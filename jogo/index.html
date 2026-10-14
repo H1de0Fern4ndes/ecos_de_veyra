@@ -1,0 +1,363 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#09121c">
+  <meta name="description" content="Ecos de Veyra — explore ruínas antigas, enfrente criaturas e restaure os cristais ancestrais.">
+  <title>Ecos de Veyra | O Último Guardião</title>
+
+  <link rel="stylesheet" href="./style.css">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+
+<body>
+  <main id="game" aria-label="Mundo 3D de Ecos de Veyra"></main>
+
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="logo">
+      <span>ECOS DE VEYRA</span>
+      <small>CRÔNICAS DO REINO ESQUECIDO</small>
+    </div>
+
+    <section class="status panel" aria-label="Status do personagem">
+      <div class="stat-label">
+        <span>Vitalidade</span>
+        <span id="hpText">100 / 100</span>
+      </div>
+      <div
+        class="bar"
+        role="progressbar"
+        aria-label="Vitalidade"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="100"
+        id="hpProgress"
+      >
+        <div id="hpBar" class="fill health"></div>
+      </div>
+
+      <div class="stat-label">
+        <span>Energia</span>
+        <span id="manaText">50 / 50</span>
+      </div>
+      <div
+        class="bar"
+        role="progressbar"
+        aria-label="Energia"
+        aria-valuemin="0"
+        aria-valuemax="50"
+        aria-valuenow="50"
+        id="manaProgress"
+      >
+        <div id="manaBar" class="fill mana"></div>
+      </div>
+
+      <div class="stat-label">
+        <span>Experiência</span>
+        <span id="levelText">Nível 1</span>
+      </div>
+      <div
+        class="bar"
+        role="progressbar"
+        aria-label="Experiência"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+        id="xpProgress"
+      >
+        <div id="xpBar" class="fill experience"></div>
+      </div>
+    </section>
+  </header>
+
+  <aside class="quest panel" aria-live="polite">
+    <div class="eyebrow">✦ Diário do guardião</div>
+    <h2 id="questTitle">O chamado antigo</h2>
+    <p id="questDescription">
+      Explore as ruínas, encontre os cristais ancestrais
+      e descubra a origem da corrupção.
+    </p>
+    <div id="objective" class="objective">Cristais: 0 / 5</div>
+  </aside>
+
+  <section id="bossStatus" class="boss-status panel hidden" aria-label="Vitalidade do chefe">
+    <div class="boss-heading">
+      <span id="bossName">Guardião Corrompido</span>
+      <span id="bossHpText">100%</span>
+    </div>
+    <div class="bar boss-bar">
+      <div id="bossHpBar" class="fill boss-health"></div>
+    </div>
+    <div id="bossPhase" class="boss-phase">A ameaça desperta...</div>
+  </section>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="interactionPrompt" class="interaction-prompt hidden">
+    <span class="interaction-key">E</span>
+    <span id="interactionText">Interagir</span>
+  </div>
+
+  <div class="crosshair" aria-hidden="true">
+    <span></span>
+  </div>
+
+  <section id="inventoryScreen" class="screen hidden" aria-label="Inventário">
+    <div class="modal menu-modal">
+      <button
+        type="button"
+        id="closeInventoryButton"
+        class="close-button"
+        aria-label="Fechar inventário"
+      >✕</button>
+
+      <div class="eyebrow">Pertences do guardião</div>
+      <h1>Inventário</h1>
+
+      <div class="inventory-summary">
+        <span id="inventoryCount">Itens: 0</span>
+        <span id="goldText">Ouro: 0</span>
+      </div>
+
+      <div id="inventoryItems" class="inventory-grid">
+        <p class="empty-state">Seus pertences aparecerão aqui.</p>
+      </div>
+
+      <div id="itemDetails" class="item-details">
+        Selecione um item para ver seus detalhes.
+      </div>
+
+      <div class="menu-actions">
+        <button type="button" id="useItemButton" disabled>USAR ITEM</button>
+        <button type="button" id="equipItemButton" disabled>EQUIPAR</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="mapScreen" class="screen hidden" aria-label="Mapa do mundo">
+    <div class="modal menu-modal">
+      <button
+        type="button"
+        id="closeMapButton"
+        class="close-button"
+        aria-label="Fechar mapa"
+      >✕</button>
+
+      <div class="eyebrow">Terras esquecidas</div>
+      <h1>Mapa</h1>
+
+      <div id="worldMap" class="world-map">
+        <p class="empty-state">O mapa será revelado durante a exploração.</p>
+      </div>
+
+      <p id="mapLocation">Localização: Ilha Esquecida</p>
+    </div>
+  </section>
+
+  <section id="skillsScreen" class="screen hidden" aria-label="Árvore de habilidades">
+    <div class="modal menu-modal">
+      <button
+        type="button"
+        id="closeSkillsButton"
+        class="close-button"
+        aria-label="Fechar habilidades"
+      >✕</button>
+
+      <div class="eyebrow">Poder ancestral</div>
+      <h1>Habilidades</h1>
+
+      <p id="skillPointsText">Pontos disponíveis: 0</p>
+
+      <div id="skillsList" class="skills-list">
+        <p class="empty-state">Suas habilidades serão exibidas aqui.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="settingsScreen" class="screen hidden" aria-label="Configurações">
+    <div class="modal menu-modal">
+      <button
+        type="button"
+        id="closeSettingsButton"
+        class="close-button"
+        aria-label="Fechar configurações"
+      >✕</button>
+
+      <div class="eyebrow">Personalize sua jornada</div>
+      <h1>Configurações</h1>
+
+      <div class="settings-list">
+        <label class="setting-row" for="graphicsSelect">
+          <span>Qualidade gráfica</span>
+          <select id="graphicsSelect">
+            <option value="low">Baixa</option>
+            <option value="medium" selected>Média</option>
+            <option value="high">Alta</option>
+          </select>
+        </label>
+
+        <label class="setting-row" for="sensitivityInput">
+          <span>Sensibilidade da câmera</span>
+          <input id="sensitivityInput" type="range" min="0.5" max="3" step="0.1" value="1">
+        </label>
+
+        <label class="setting-row" for="volumeInput">
+          <span>Volume</span>
+          <input id="volumeInput" type="range" min="0" max="1" step="0.05" value="0.5">
+        </label>
+
+        <label class="setting-row" for="shadowsToggle">
+          <span>Sombras</span>
+          <input id="shadowsToggle" type="checkbox" checked>
+        </label>
+      </div>
+
+      <button type="button" id="saveSettingsButton">APLICAR CONFIGURAÇÕES</button>
+    </div>
+  </section>
+
+  <section id="dialogueScreen" class="screen hidden" aria-label="Diálogo">
+    <div class="modal dialogue-modal">
+      <div class="eyebrow" id="dialogueSpeaker">Viajante desconhecido</div>
+      <h1 id="dialogueTitle">Uma voz na névoa</h1>
+      <p id="dialogueText"></p>
+      <div id="dialogueChoices" class="dialogue-choices"></div>
+      <button type="button" id="closeDialogueButton">ENCERRAR CONVERSA</button>
+    </div>
+  </section>
+
+  <footer class="bottom">
+    <div id="message" class="message" aria-live="polite">
+      A névoa esconde segredos antigos...
+    </div>
+
+    <div class="controls" aria-label="Controles do jogo">
+      <span><kbd>WASD</kbd> Mover</span>
+      <span><kbd>SHIFT</kbd> Correr</span>
+      <span><kbd>CLIQUE</kbd> Atacar</span>
+      <span><kbd>ESPAÇO</kbd> Esquivar</span>
+      <span><kbd>Q</kbd> Habilidade</span>
+      <span><kbd>E</kbd> Interagir</span>
+      <span><kbd>TAB</kbd> Inventário</span>
+      <span><kbd>M</kbd> Mapa</span>
+      <span><kbd>ESC</kbd> Pausar</span>
+    </div>
+  </footer>
+
+  <section id="startScreen" class="screen">
+    <div class="modal">
+      <div class="rune">✧</div>
+      <div class="eyebrow">Uma aventura original</div>
+      <h1>Ecos de Veyra</h1>
+      <p>
+        Cinco cristais ancestrais foram corrompidos.
+        Explore a ilha esquecida, enfrente criaturas
+        e restaure o equilíbrio do reino.
+      </p>
+
+      <div class="start-actions">
+        <button type="button" id="startButton">NOVA JORNADA</button>
+        <button type="button" id="continueButton" class="secondary-button" disabled>
+          CONTINUAR
+        </button>
+        <button type="button" id="openSettingsButton" class="secondary-button">
+          CONFIGURAÇÕES
+        </button>
+      </div>
+
+      <p class="small-note">
+        O progresso poderá ser salvo neste dispositivo.
+      </p>
+    </div>
+  </section>
+
+  <section id="pauseScreen" class="screen hidden">
+    <div class="modal">
+      <div class="eyebrow">A jornada está suspensa</div>
+      <h1>Pausado</h1>
+      <p>Seu progresso nesta sessão está preservado.</p>
+
+      <div class="start-actions">
+        <button type="button" id="resumeButton">CONTINUAR</button>
+        <button type="button" id="pauseSaveButton" class="secondary-button">
+          SALVAR JOGO
+        </button>
+        <button type="button" id="pauseSettingsButton" class="secondary-button">
+          CONFIGURAÇÕES
+        </button>
+        <button type="button" id="mainMenuButton" class="secondary-button">
+          MENU PRINCIPAL
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section id="endScreen" class="screen hidden">
+    <div class="modal">
+      <div class="rune">✧</div>
+      <div class="eyebrow" id="endEyebrow">Crônicas de Veyra</div>
+      <h1 id="endTitle">Fim da jornada</h1>
+      <p id="endDescription"></p>
+      <button type="button" id="restartButton">JOGAR NOVAMENTE</button>
+    </div>
+  </section>
+
+  <section id="loadingScreen" class="screen hidden" aria-live="polite">
+    <div class="modal loading-modal">
+      <div class="rune">✧</div>
+      <h1>Preparando Veyra</h1>
+      <p id="loadingText">A névoa está se dissipando...</p>
+      <div class="bar loading-bar">
+        <div id="loadingProgress" class="fill experience"></div>
+      </div>
+    </div>
+  </section>
+
+  <div id="mobileControls" class="mobile-controls hidden" aria-label="Controles de toque">
+    <div class="movement-pad" aria-label="Movimentação">
+      <button type="button" data-move="forward" aria-label="Mover para frente">▲</button>
+      <div class="movement-middle">
+        <button type="button" data-move="left" aria-label="Mover para esquerda">◀</button>
+        <button type="button" data-move="backward" aria-label="Mover para trás">▼</button>
+        <button type="button" data-move="right" aria-label="Mover para direita">▶</button>
+      </div>
+    </div>
+
+    <div class="action-pad" aria-label="Ações">
+      <button type="button" data-action="attack" aria-label="Atacar">⚔</button>
+      <button type="button" data-action="dodge" aria-label="Esquivar">↗</button>
+      <button type="button" data-action="interact" aria-label="Interagir">E</button>
+      <button type="button" data-action="skill" aria-label="Habilidade especial">Q</button>
+    </div>
+
+    <div class="mobile-look-hint">Arraste a tela para controlar a câmera</div>
+  </div>
+
+  <noscript>
+    <div class="screen">
+      <div class="modal">
+        <h1>JavaScript necessário</h1>
+        <p>Ative o JavaScript no navegador para jogar Ecos de Veyra.</p>
+      </div>
+    </div>
+  </noscript>
+
+  <script type="module" src="./js/game.js"></script>
+</body>
+</html>
