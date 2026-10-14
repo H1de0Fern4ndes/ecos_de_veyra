@@ -1,316 +1,190 @@
 
 import * as THREE from "three";
 
-/*
- * ECOS DE VEYRA — O ÚLTIMO GUARDIÃO
- * Núcleo jogável: mundo 3D, personagem, câmera, combate,
- * inimigos, cristais, experiência, chefe, interface e salvamento.
- */
+/* =========================================================
+   ECOS DE VEYRA
+   Mundo 3D, personagem, câmera, combate e interface
+   ========================================================= */
 
 const $ = (id) => document.getElementById(id);
 
 const ui = {
   game: $("game"),
-  hpText: $("hpText"),
-  hpBar: $("hpBar"),
-  hpProgress: $("hpProgress"),
-  manaText: $("manaText"),
-  manaBar: $("manaBar"),
-  manaProgress: $("manaProgress"),
-  levelText: $("levelText"),
-  xpBar: $("xpBar"),
-  xpProgress: $("xpProgress"),
-  questTitle: $("questTitle"),
-  questDescription: $("questDescription"),
-  objective: $("objective"),
-  message: $("message"),
-  toast: $("toast"),
-  startScreen: $("startScreen"),
-  pauseScreen: $("pauseScreen"),
-  endScreen: $("endScreen"),
-  endTitle: $("endTitle"),
-  endDescription: $("endDescription"),
-  bossStatus: $("bossStatus"),
-  bossName: $("bossName"),
-  bossHpText: $("bossHpText"),
-  bossHpBar: $("bossHpBar"),
-  bossPhase: $("bossPhase"),
-  interactionPrompt: $("interactionPrompt"),
-  interactionText: $("interactionText"),
-  inventoryScreen: $("inventoryScreen"),
-  inventoryItems: $("inventoryItems"),
-  inventoryCount: $("inventoryCount"),
-  itemDetails: $("itemDetails"),
-  useItemButton: $("useItemButton"),
-  equipItemButton: $("equipItemButton"),
-  goldText: $("goldText"),
-  mapScreen: $("mapScreen"),
-  worldMap: $("worldMap"),
-  mapLocation: $("mapLocation"),
-  skillsScreen: $("skillsScreen"),
-  skillsList: $("skillsList"),
-  skillPointsText: $("skillPointsText"),
-  settingsScreen: $("settingsScreen"),
-  graphicsSelect: $("graphicsSelect"),
-  sensitivityInput: $("sensitivityInput"),
-  volumeInput: $("volumeInput"),
-  shadowsToggle: $("shadowsToggle"),
-  dialogueScreen: $("dialogueScreen"),
-  dialogueSpeaker: $("dialogueSpeaker"),
-  dialogueTitle: $("dialogueTitle"),
-  dialogueText: $("dialogueText"),
-  dialogueChoices: $("dialogueChoices"),
-  loadingScreen: $("loadingScreen"),
-  loadingText: $("loadingText"),
-  loadingProgress: $("loadingProgress"),
-  continueButton: $("continueButton"),
-  mobileControls: $("mobileControls"),
-};
-
-const CONFIG = {
-  worldSize: 180,
-  playerSpeed: 7,
-  runMultiplier: 1.65,
-  attackRange: 3.5,
-  attackCooldown: 0.55,
-  dodgeDuration: 0.32,
-  dodgeCooldown: 1.0,
-  enemyThinkInterval: 0.15,
-  saveKey: "ecos-de-veyra-save-v1",
+  gameInterface: $("gameInterface"),
+  start: $("startScreen"),
+  pause: $("pauseScreen"),
+  inventory: $("inventoryScreen"),
+  map: $("mapScreen"),
+  skills: $("skillsScreen"),
+  settings: $("settingsScreen"),
+  dialogue: $("dialogueScreen"),
+  ending: $("endScreen"),
+  loading: $("loadingScreen"),
+  mobile: $("mobileControls")
 };
 
 const state = {
-  running: false,
   started: false,
   paused: false,
-  ended: false,
-  victory: false,
-  inventoryOpen: false,
-  mapOpen: false,
-  skillsOpen: false,
-  settingsOpen: false,
-  dialogueOpen: false,
-  pointerLocked: false,
-  crystals: 0,
-  bossSpawned: false,
-  bossDefeated: false,
-  selectedItem: null,
-  toastTimer: 0,
-  playTime: 0,
-  location: "Ilha Esquecida",
-};
-
-const playerData = {
-  hp: 100,
-  maxHp: 100,
-  mana: 50,
-  maxMana: 50,
+  dead: false,
+  health: 100,
+  maxHealth: 100,
+  mana: 100,
+  maxMana: 100,
   level: 1,
   xp: 0,
   xpNext: 100,
-  attack: 20,
-  defense: 3,
-  speed: CONFIG.playerSpeed,
-  skillPoints: 0,
   gold: 0,
-  invulnerable: 0,
+  skillPoints: 0,
+  crystals: 0,
+  kills: 0,
+  selectedItem: null,
+  inventory: [],
+  skills: { strength: 0, vitality: 0, arcana: 0 },
+  keys: new Set(),
+  mobileMoves: new Set(),
+  mouseDown: false,
+  yaw: 0,
+  pitch: 0.16,
+  lastTime: 0,
   attackCooldown: 0,
   dodgeCooldown: 0,
-  dodgeTime: 0,
-  dead: false,
+  invulnerability: 0,
+  playerSpeed: 5,
+  settings: {
+    sensitivity: 1,
+    volume: 0.7,
+    shadows: true,
+    graphics: "medium"
+  }
 };
-
-const inventory = [];
-const enemies = [];
-const crystals = [];
-const interactables = [];
-const colliders = [];
-const keys = new Set();
-const touchMoves = new Set();
 
 let scene;
 let camera;
 let renderer;
 let clock;
 let player;
-let playerVisual;
-let sword;
-let swordPivot;
-let sunLight;
-let ambientLight;
-let sky;
+let playerModel;
+let playerParts = {};
 let ground;
+let worldGroup;
+let enemies = [];
+let collectibles = [];
+let particles = [];
+let npcs = [];
 let boss = null;
-let attackAnimation = 0;
-let attackQueued = false;
-let enemyThinkTimer = 0;
-let saveRequested = false;
-let selectedInteractable = null;
+let activeInteraction = null;
+let currentDialogue = null;
 let animationFrame = 0;
-let lastAutosave = 0;
+let saveExists = false;
+let toastTimer = null;
+let audioContext = null;
 
-const cameraState = {
-  yaw: 0,
-  pitch: 0.27,
-  distance: 7,
-  sensitivity: 1,
-  dragging: false,
-  lastX: 0,
-  lastY: 0,
+const WORLD = {
+  size: 180,
+  playerSpawn: new THREE.Vector3(0, 0, 12)
 };
 
-const settings = {
-  graphics: "medium",
-  volume: 0.5,
-  shadows: true,
-};
+const MATERIALS = {};
 
-const tmpVec = new THREE.Vector3();
-const tmpVec2 = new THREE.Vector3();
-const raycaster = new THREE.Raycaster();
+function material(name, color, roughness = 0.7, metalness = 0) {
+  if (!MATERIALS[name]) {
+    MATERIALS[name] = new THREE.MeshStandardMaterial({
+      color,
+      roughness,
+      metalness
+    });
+  }
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+  return MATERIALS[name];
 }
 
-function random(min, max) {
-  return min + Math.random() * (max - min);
+function makeStandardMaterials() {
+  material("armor", 0x252d3b, 0.38, 0.72);
+  material("armorLight", 0x596477, 0.32, 0.8);
+  material("darkSteel", 0x111722, 0.32, 0.8);
+  material("gold", 0xc7a461, 0.32, 0.7);
+  material("cloth", 0x242d45, 0.9);
+  material("clothDark", 0x101827, 0.92);
+  material("skin", 0xb77d60, 0.85);
+  material("hair", 0x17141e, 0.9);
+  material("leather", 0x493024, 0.8);
+  material("bone", 0xc4c3b5, 0.75);
+  material("enemy", 0x3a202d, 0.65);
+  material("enemyArmor", 0x261d2c, 0.4, 0.65);
+  material("stone", 0x3b4652, 0.95);
+  material("stoneDark", 0x202a35, 0.95);
+  material("crystal", 0x51d9f4, 0.18, 0.15);
+  material("crystalGlow", 0x9df4ff, 0.15, 0.1);
+  material("eye", 0x92f2ff, 0.2, 0);
+  material("wood", 0x483528, 0.95);
+  material("boss", 0x211c32, 0.38, 0.5);
+  material("bossMetal", 0x59486e, 0.3, 0.7);
 }
 
-function distanceXZ(a, b) {
-  const dx = a.x - b.x;
-  const dz = a.z - b.z;
-  return Math.sqrt(dx * dx + dz * dz);
-}
-
-function makeMaterial(color, roughness = 0.9, extra = {}) {
-  return new THREE.MeshStandardMaterial({
-    color,
-    roughness,
-    ...extra,
-  });
-}
-
-function addMesh(geometry, material, parent, x, y, z) {
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(x, y, z);
+function makeMesh(geometry, mat, parent, position = [0, 0, 0]) {
+  const mesh = new THREE.Mesh(geometry, mat);
+  mesh.position.set(...position);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
 }
 
-function createBox(parent, x, y, z, sx, sy, sz, color, options = {}) {
-  const mesh = addMesh(
-    new THREE.BoxGeometry(sx, sy, sz),
-    makeMaterial(color, options.roughness ?? 0.9, options.material ?? {}),
+function box(parent, mat, size, pos, bevel = false) {
+  const geometry = bevel
+    ? new THREE.BoxGeometry(...size)
+    : new THREE.BoxGeometry(...size);
+
+  return makeMesh(geometry, mat, parent, pos);
+}
+
+function sphere(parent, mat, radius, pos, scale = [1, 1, 1]) {
+  const mesh = makeMesh(
+    new THREE.SphereGeometry(radius, 16, 12),
+    mat,
     parent,
-    x, y, z
+    pos
   );
 
-  if (options.castShadow !== false) mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.scale.set(...scale);
   return mesh;
 }
 
-function showMessage(text) {
-  if (ui.message) ui.message.textContent = text;
+function cylinder(parent, mat, radiusTop, radiusBottom, height, pos, sides = 10) {
+  return makeMesh(
+    new THREE.CylinderGeometry(radiusTop, radiusBottom, height, sides),
+    mat,
+    parent,
+    pos
+  );
 }
 
-function showToast(text, duration = 2300) {
-  if (!ui.toast) return;
-
-  ui.toast.textContent = text;
-  ui.toast.classList.add("show");
-  state.toastTimer = duration / 1000;
+function group(parent, position = [0, 0, 0]) {
+  const obj = new THREE.Group();
+  obj.position.set(...position);
+  parent.add(obj);
+  return obj;
 }
 
-function hideToast() {
-  ui.toast?.classList.remove("show");
+function capsule(parent, mat, radius, length, pos) {
+  const mesh = makeMesh(
+    new THREE.CapsuleGeometry(radius, length, 4, 8),
+    mat,
+    parent,
+    pos
+  );
+  return mesh;
 }
 
-function setScreen(screen, visible) {
-  if (!screen) return;
-  screen.classList.toggle("hidden", !visible);
-}
+/* ---------- Inicialização ---------- */
 
-function setQuest(title, description, objective) {
-  if (ui.questTitle) ui.questTitle.textContent = title;
-  if (ui.questDescription) ui.questDescription.textContent = description;
-  if (ui.objective) ui.objective.textContent = objective;
-}
+function init() {
+  makeStandardMaterials();
 
-function updateHUD() {
-  const hp = clamp(playerData.hp, 0, playerData.maxHp);
-  const mana = clamp(playerData.mana, 0, playerData.maxMana);
-  const xpPercent = playerData.xpNext > 0
-    ? (playerData.xp / playerData.xpNext) * 100
-    : 0;
-
-  if (ui.hpText) {
-    ui.hpText.textContent = `${Math.ceil(hp)} / ${playerData.maxHp}`;
-  }
-
-  if (ui.hpBar) {
-    ui.hpBar.style.width = `${(hp / playerData.maxHp) * 100}%`;
-  }
-
-  if (ui.hpProgress) {
-    ui.hpProgress.setAttribute("aria-valuenow", String(Math.ceil(hp)));
-    ui.hpProgress.setAttribute("aria-valuemax", String(playerData.maxHp));
-  }
-
-  if (ui.manaText) {
-    ui.manaText.textContent = `${Math.ceil(mana)} / ${playerData.maxMana}`;
-  }
-
-  if (ui.manaBar) {
-    ui.manaBar.style.width = `${(mana / playerData.maxMana) * 100}%`;
-  }
-
-  if (ui.manaProgress) {
-    ui.manaProgress.setAttribute("aria-valuenow", String(Math.ceil(mana)));
-    ui.manaProgress.setAttribute("aria-valuemax", String(playerData.maxMana));
-  }
-
-  if (ui.levelText) {
-    ui.levelText.textContent = `Nível ${playerData.level}`;
-  }
-
-  if (ui.xpBar) {
-    ui.xpBar.style.width = `${clamp(xpPercent, 0, 100)}%`;
-  }
-
-  if (ui.xpProgress) {
-    ui.xpProgress.setAttribute("aria-valuenow", String(playerData.xp));
-    ui.xpProgress.setAttribute("aria-valuemax", String(playerData.xpNext));
-  }
-
-  if (ui.goldText) {
-    ui.goldText.textContent = `Ouro: ${playerData.gold}`;
-  }
-
-  if (boss && !boss.dead && ui.bossStatus) {
-    ui.bossStatus.classList.remove("hidden");
-    ui.bossHpText.textContent =
-      `${Math.ceil((boss.hp / boss.maxHp) * 100)}%`;
-    ui.bossHpBar.style.width =
-      `${clamp((boss.hp / boss.maxHp) * 100, 0, 100)}%`;
-
-    ui.bossPhase.textContent = boss.phase >= 2
-      ? "Fase II — Fúria ancestral"
-      : "Fase I — Guardião desperto";
-  } else {
-    ui.bossStatus?.classList.add("hidden");
-  }
-}
-
-/* =========================================================
-   CENA E AMBIENTE
-========================================================= */
-
-function createWorld() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x8197a4);
-  scene.fog = new THREE.FogExp2(0x8197a4, 0.008);
+  scene.background = new THREE.Color(0x09111d);
+  scene.fog = new THREE.FogExp2(0x09111d, 0.0085);
 
   camera = new THREE.PerspectiveCamera(
     65,
@@ -321,7 +195,8 @@ function createWorld() {
 
   renderer = new THREE.WebGLRenderer({
     antialias: true,
-    powerPreference: "high-performance",
+    alpha: false,
+    powerPreference: "high-performance"
   });
 
   renderer.setPixelRatio(
@@ -329,2659 +204,2747 @@ function createWorld() {
   );
 
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = settings.shadows;
+
+  renderer.shadowMap.enabled = state.settings.shadows;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  renderer.toneMappingExposure = 1.15;
 
-  renderer.domElement.tabIndex = 0;
-  ui.game.appendChild(renderer.domElement);
+  ui.game.replaceChildren(renderer.domElement);
 
-  ambientLight = new THREE.HemisphereLight(
-    0xb9d8ed,
-    0x273021,
-    1.7
-  );
-  scene.add(ambientLight);
+  clock = new THREE.Clock();
 
-  sunLight = new THREE.DirectionalLight(0xffe2b0, 2.5);
-  sunLight.position.set(-35, 55, 25);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(1024, 1024);
-  sunLight.shadow.camera.left = -60;
-  sunLight.shadow.camera.right = 60;
-  sunLight.shadow.camera.top = 60;
-  sunLight.shadow.camera.bottom = -60;
-  sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far = 150;
-  scene.add(sunLight);
+  createLighting();
+  createWorld();
+  createPlayer();
+  createWorldObjects();
+  createEnemies();
+  createNPCs();
+  createBoss();
+  setupEvents();
+  setupUI();
+  loadSettings();
 
-  sky = new THREE.Mesh(
-    new THREE.SphereGeometry(300, 24, 16),
-    new THREE.MeshBasicMaterial({
-      color: 0x8197a4,
-      side: THREE.BackSide,
-    })
-  );
-  scene.add(sky);
+  ui.loading.classList.add("hidden");
+  ui.start.classList.remove("hidden");
 
-  const groundGeometry = new THREE.PlaneGeometry(
-    CONFIG.worldSize,
-    CONFIG.worldSize,
-    50,
-    50
+  saveExists = Boolean(localStorage.getItem("veyra-save"));
+  updateContinueButton();
+  updateHUD();
+
+  window.addEventListener("resize", onResize);
+
+  animationFrame = requestAnimationFrame(loop);
+}
+
+/* ---------- Iluminação ---------- */
+
+function createLighting() {
+  const ambient = new THREE.HemisphereLight(
+    0x9ab9d7,
+    0x11111c,
+    1.25
   );
 
-  const positions = groundGeometry.attributes.position;
+  scene.add(ambient);
 
-  for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i);
-    const y = positions.getY(i);
+  const moon = new THREE.DirectionalLight(0xb3d9f3, 2.1);
+  moon.position.set(-30, 45, 25);
+  moon.castShadow = true;
 
-    const height =
-      Math.sin(x * 0.065) * 0.7 +
-      Math.cos(y * 0.08) * 0.5 +
-      Math.sin((x + y) * 0.035) * 1.2;
+  moon.shadow.mapSize.set(1024, 1024);
+  moon.shadow.camera.left = -45;
+  moon.shadow.camera.right = 45;
+  moon.shadow.camera.top = 45;
+  moon.shadow.camera.bottom = -45;
+  moon.shadow.bias = -0.0003;
 
-    positions.setZ(i, height);
-  }
+  scene.add(moon);
 
-  groundGeometry.computeVertexNormals();
+  const arcaneLight = new THREE.PointLight(0x279cc8, 28, 55, 2);
+  arcaneLight.position.set(0, 5, -8);
+  scene.add(arcaneLight);
 
-  const groundMaterial = new THREE.MeshStandardMaterial({
-    color: 0x354b3d,
+  const warmLight = new THREE.PointLight(0xd6a45f, 18, 35, 2);
+  warmLight.position.set(-12, 3, 5);
+  scene.add(warmLight);
+}
+
+/* ---------- Terreno e cenário ---------- */
+
+function createWorld() {
+  worldGroup = group(scene);
+
+  const floorGeometry = new THREE.PlaneGeometry(
+    WORLD.size,
+    WORLD.size,
+    32,
+    32
+  );
+
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x18241f,
     roughness: 1,
-    flatShading: true,
+    metalness: 0
   });
 
-  ground = new THREE.Mesh(groundGeometry, groundMaterial);
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  createWater();
-  createForest();
-  createRuins();
-  createRockFormations();
-  createCrystals();
-  createPlayer();
-  createEnemies();
-  createAncientAltar();
-  createAmbientParticles();
-}
-
-function createWater() {
-  const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(240, 240),
-    new THREE.MeshStandardMaterial({
-      color: 0x173b4c,
-      roughness: 0.22,
-      metalness: 0.15,
-      transparent: true,
-      opacity: 0.85,
-    })
+  ground = makeMesh(
+    floorGeometry,
+    floorMaterial,
+    worldGroup,
+    [0, -0.15, 0]
   );
 
-  water.rotation.x = -Math.PI / 2;
-  water.position.set(0, -2.7, 0);
-  scene.add(water);
-}
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
 
-function createForest() {
-  const treeTrunk = makeMaterial(0x49372b);
-  const treeLeaves = [
-    makeMaterial(0x233d34),
-    makeMaterial(0x2d4939),
-    makeMaterial(0x344d3e),
-  ];
+  const grid = new THREE.GridHelper(
+    WORLD.size,
+    36,
+    0x344b58,
+    0x243440
+  );
 
-  const trunkGeo = new THREE.CylinderGeometry(0.25, 0.45, 3.5, 7);
-  const crownGeo = new THREE.ConeGeometry(2, 5.5, 7);
+  grid.position.y = -0.13;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.12;
+  worldGroup.add(grid);
 
-  for (let i = 0; i < 115; i++) {
-    let x = random(-82, 82);
-    let z = random(-82, 82);
-
-    // Mantém uma área livre ao redor do início.
-    if (Math.abs(x) < 14 && Math.abs(z) < 14) {
-      x += x < 0 ? -16 : 16;
-      z += z < 0 ? -16 : 16;
-    }
-
-    // Evita bloquear a área central do altar.
-    if (Math.abs(x - 30) < 10 && Math.abs(z + 25) < 10) {
-      x += 15;
-    }
-
-    const scale = random(0.7, 1.45);
-    const tree = new THREE.Group();
-    tree.position.set(x, 0, z);
-    tree.scale.setScalar(scale);
-
-    const trunk = addMesh(
-      trunkGeo,
-      treeTrunk,
-      tree,
-      0,
-      1.7,
-      0
-    );
-    trunk.castShadow = true;
-
-    const crown = addMesh(
-      crownGeo,
-      treeLeaves[Math.floor(Math.random() * treeLeaves.length)],
-      tree,
-      0,
-      5.1,
-      0
-    );
-    crown.castShadow = true;
-
-    const crown2 = addMesh(
-      crownGeo,
-      treeLeaves[Math.floor(Math.random() * treeLeaves.length)],
-      tree,
-      0,
-      7.1,
-      0
-    );
-    crown2.scale.setScalar(0.72);
-    crown2.castShadow = true;
-
-    scene.add(tree);
-
-    colliders.push({
-      x,
-      z,
-      radius: 1.1 * scale,
-    });
-  }
+  createRuins();
+  createTrees();
+  createRocks();
+  createCrystalClusters();
 }
 
 function createRuins() {
-  const stone = makeMaterial(0x6a716e);
-  const darkStone = makeMaterial(0x424c4d);
-  const group = new THREE.Group();
+  const ruins = group(worldGroup);
+
+  const positions = [
+    [-17, -15], [-12, -18], [-7, -18],
+    [13, -16], [18, -12], [19, -7],
+    [-22, 2], [-21, 7], [22, 5],
+    [9, 18], [14, 20], [-12, 22]
+  ];
+
+  for (let i = 0; i < positions.length; i++) {
+    const [x, z] = positions[i];
+    const height = 2.2 + (i % 3) * 0.65;
+
+    const pillar = box(
+      ruins,
+      i % 2 ? MATERIALS.stone : MATERIALS.stoneDark,
+      [1.15, height, 1.15],
+      [x, height / 2, z]
+    );
+
+    pillar.rotation.y = (i % 4) * 0.12;
+
+    box(
+      ruins,
+      MATERIALS.stone,
+      [1.5, 0.22, 1.5],
+      [x, height + 0.04, z]
+    );
+
+    if (i % 3 === 0) {
+      const broken = box(
+        ruins,
+        MATERIALS.stoneDark,
+        [1.5, 0.65, 1.2],
+        [x + 1.3, 0.35, z + 1.1]
+      );
+
+      broken.rotation.set(0.15, 0.45, 0.2);
+    }
+  }
+
+  // Arco de pedra ao fundo.
+  for (let i = 0; i < 4; i++) {
+    box(
+      ruins,
+      MATERIALS.stone,
+      [0.9, 4.4, 0.9],
+      [-4.5 + i * 3, 2.2, -26]
+    );
+  }
+
+  box(
+    ruins,
+    MATERIALS.stone,
+    [10.3, 0.8, 1],
+    [0, 4.5, -26]
+  );
 
   // Plataforma central.
-  createBox(group, 0, 0.25, 0, 14, 0.5, 12, 0x535e5b);
-  createBox(group, 0, 0.55, 0, 11, 0.2, 9, 0x737a72);
+  cylinder(
+    ruins,
+    MATERIALS.stoneDark,
+    4.6,
+    5.2,
+    0.65,
+    [0, 0.15, -7],
+    12
+  );
 
-  // Pilares e vigas.
-  for (const x of [-5, 5]) {
-    for (const z of [-3.5, 3.5]) {
-      const pillar = createBox(
-        group, x, 2.4, z, 1.1, 4.4, 1.1, 0x727a74
-      );
-      pillar.material = stone;
-    }
-  }
+  cylinder(
+    ruins,
+    MATERIALS.stone,
+    3.7,
+    4.1,
+    0.28,
+    [0, 0.56, -7],
+    12
+  );
 
-  createBox(group, 0, 4.7, -3.5, 11, 0.8, 1.2, 0x525c59);
-  createBox(group, -5, 4.7, 0, 1.2, 0.8, 7, 0x525c59);
-  createBox(group, 5, 4.7, 0, 1.2, 0.8, 7, 0x525c59);
+  // Runas circulares discretas.
+  const runeMaterial = new THREE.MeshBasicMaterial({
+    color: 0x4abbd6,
+    transparent: true,
+    opacity: 0.32
+  });
 
-  // Pedras espalhadas ao redor.
-  for (let i = 0; i < 14; i++) {
-    const angle = random(0, Math.PI * 2);
-    const radius = random(9, 14);
+  const rune = makeMesh(
+    new THREE.TorusGeometry(2.9, 0.035, 6, 64),
+    runeMaterial,
+    ruins,
+    [0, 0.72, -7]
+  );
 
-    const rock = addMesh(
-      new THREE.DodecahedronGeometry(random(0.6, 1.6), 0),
-      darkStone,
-      group,
-      Math.cos(angle) * radius,
-      random(0.2, 0.7),
-      Math.sin(angle) * radius
+  rune.rotation.x = Math.PI / 2;
+}
+
+function createTrees() {
+  const treeGroup = group(worldGroup);
+
+  for (let i = 0; i < 75; i++) {
+    const x = (Math.random() - 0.5) * 145;
+    const z = (Math.random() - 0.5) * 145;
+
+    if (Math.abs(x) < 24 && Math.abs(z) < 28) continue;
+
+    const height = 2.5 + Math.random() * 2.5;
+    const trunk = cylinder(
+      treeGroup,
+      MATERIALS.wood,
+      0.18,
+      0.32,
+      height,
+      [x, height / 2, z],
+      7
     );
 
-    rock.rotation.set(random(0, 1), random(0, 3), random(0, 1));
-    rock.castShadow = true;
-    rock.receiveShadow = true;
-  }
+    trunk.rotation.z = (Math.random() - 0.5) * 0.1;
 
-  group.position.set(30, 0, -25);
-  scene.add(group);
+    const leaves = sphere(
+      treeGroup,
+      material(
+        `foliage${i % 3}`,
+        [0x182c2a, 0x1b302d, 0x22342d][i % 3],
+        1
+      ),
+      1,
+      [x, height + 0.6, z],
+      [1.15, 1.7, 1.15]
+    );
 
-  colliders.push({ x: 30, z: -25, radius: 8 });
-
-  // Pequenas ruínas adicionais.
-  for (const pos of [
-    [-34, -35],
-    [43, 42],
-    [-50, 25],
-  ]) {
-    const ruin = new THREE.Group();
-
-    createBox(ruin, 0, 0.25, 0, 7, 0.5, 6, 0x515b59);
-
-    for (const x of [-2.5, 2.5]) {
-      const height = random(1.8, 3.8);
-      createBox(
-        ruin, x, height / 2 + 0.4, 0,
-        0.7, height, 0.7, 0x69736e
-      );
-    }
-
-    ruin.position.set(pos[0], 0, pos[1]);
-    scene.add(ruin);
+    leaves.scale.multiplyScalar(1 + Math.random() * 0.4);
   }
 }
 
-function createRockFormations() {
-  const rockMaterials = [
-    makeMaterial(0x505b59),
-    makeMaterial(0x626c68),
-    makeMaterial(0x3d4949),
-  ];
+function createRocks() {
+  const rocks = group(worldGroup);
 
   for (let i = 0; i < 65; i++) {
-    const x = random(-85, 85);
-    const z = random(-85, 85);
+    const x = (Math.random() - 0.5) * 140;
+    const z = (Math.random() - 0.5) * 140;
 
-    if (Math.abs(x) < 12 && Math.abs(z) < 12) continue;
+    if (Math.abs(x) < 10 && Math.abs(z) < 12) continue;
 
-    const scale = random(0.4, 1.9);
-
-    const rock = addMesh(
-      new THREE.DodecahedronGeometry(1, 0),
-      rockMaterials[Math.floor(Math.random() * rockMaterials.length)],
-      scene,
-      x,
-      scale * 0.35,
-      z
+    const rock = makeMesh(
+      new THREE.DodecahedronGeometry(
+        0.35 + Math.random() * 1.1,
+        0
+      ),
+      MATERIALS.stoneDark,
+      rocks,
+      [x, 0.25, z]
     );
 
-    rock.scale.set(scale, scale * random(0.7, 1.4), scale);
-    rock.rotation.set(random(0, 1), random(0, 6), random(0, 1));
-    rock.castShadow = true;
-    rock.receiveShadow = true;
-
-    colliders.push({ x, z, radius: scale * 0.8 });
+    rock.scale.y = 0.45 + Math.random() * 0.6;
+    rock.rotation.set(
+      Math.random(),
+      Math.random() * Math.PI,
+      Math.random()
+    );
   }
 }
 
-function createAmbientParticles() {
-  const count = 350;
-  const positions = new Float32Array(count * 3);
+function createCrystalClusters() {
+  const locations = [
+    [-7, 0, -4],
+    [8, 0, -12],
+    [-19, 0, -4],
+    [17, 0, 7],
+    [-9, 0, 17],
+    [23, 0, -23]
+  ];
 
-  for (let i = 0; i < count; i++) {
-    positions[i * 3] = random(-85, 85);
-    positions[i * 3 + 1] = random(0.5, 15);
-    positions[i * 3 + 2] = random(-85, 85);
+  for (const position of locations) {
+    const cluster = group(worldGroup, position);
+
+    for (let i = 0; i < 4; i++) {
+      const height = 0.7 + Math.random() * 1.15;
+
+      const crystal = makeMesh(
+        new THREE.OctahedronGeometry(0.42, 0),
+        MATERIALS.crystal,
+        cluster,
+        [
+          (Math.random() - 0.5) * 1.2,
+          height / 2,
+          (Math.random() - 0.5) * 1.2
+        ]
+      );
+
+      crystal.scale.set(0.65, height, 0.65);
+      crystal.rotation.z = (Math.random() - 0.5) * 0.4;
+
+      const glow = new THREE.PointLight(0x46c9ee, 1.5, 5);
+      glow.position.copy(crystal.position);
+      cluster.add(glow);
+    }
   }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.BufferAttribute(positions, 3)
-  );
-
-  const material = new THREE.PointsMaterial({
-    color: 0xb6eaff,
-    size: 0.11,
-    transparent: true,
-    opacity: 0.65,
-    depthWrite: false,
-  });
-
-  const particles = new THREE.Points(geometry, material);
-  particles.name = "ambientParticles";
-  scene.add(particles);
 }
 
-/* =========================================================
-   PERSONAGEM
-========================================================= */
+/* ---------- Personagem humanoide ---------- */
 
-function createPlayer() {
-  player = new THREE.Group();
-  player.position.set(0, 0, 0);
-  scene.add(player);
+function createHumanoid(options = {}) {
+  const {
+    type = "player",
+    scale = 1,
+    skin = MATERIALS.skin,
+    armor = MATERIALS.armor,
+    cloth = MATERIALS.cloth,
+    accent = MATERIALS.gold,
+    hair = MATERIALS.hair
+  } = options;
 
-  playerVisual = new THREE.Group();
-  player.add(playerVisual);
+  const root = group(scene);
+  root.scale.setScalar(scale);
 
-  const armor = makeMaterial(0x303f50, 0.65);
-  const armorLight = makeMaterial(0x667b8b, 0.6);
-  const skin = makeMaterial(0xd1ad91);
-  const cloth = makeMaterial(0x4b2534);
-  const gold = makeMaterial(0xc9a85e, 0.45);
+  const rig = group(root);
 
-  // Pernas.
-  const leftLeg = createBox(
-    playerVisual, -0.23, 0.43, 0, 0.27, 0.85, 0.32, 0x29313b
-  );
-  const rightLeg = createBox(
-    playerVisual, 0.23, 0.43, 0, 0.27, 0.85, 0.32, 0x29313b
-  );
+  // Pernas articuladas.
+  const leftLeg = group(rig, [-0.19, 0.91, 0]);
+  const rightLeg = group(rig, [0.19, 0.91, 0]);
 
-  // Corpo e armadura.
-  const torso = addMesh(
-    new THREE.CapsuleGeometry(0.43, 0.7, 4, 8),
+  for (const [leg, side] of [
+    [leftLeg, "left"],
+    [rightLeg, "right"]
+  ]) {
+    capsule(leg, cloth, 0.13, 0.4, [0, -0.23, 0]);
+
+    box(
+      leg,
+      armor,
+      [0.3, 0.32, 0.31],
+      [0, -0.49, 0],
+      true
+    );
+
+    box(
+      leg,
+      MATERIALS.darkSteel,
+      [0.32, 0.12, 0.43],
+      [0, -0.7, -0.06]
+    );
+
+    box(
+      leg,
+      MATERIALS.leather,
+      [0.33, 0.12, 0.42],
+      [0, -0.77, -0.05]
+    );
+  }
+
+  // Cintura e torso.
+  const waist = cylinder(
+    rig,
     armor,
-    playerVisual,
-    0, 1.45, 0
+    0.31,
+    0.32,
+    0.23,
+    [0, 1.16, 0],
+    8
   );
 
-  torso.scale.set(0.9, 1, 0.7);
-  torso.castShadow = true;
+  waist.rotation.y = Math.PI / 8;
 
-  createBox(
-    playerVisual, 0, 1.35, -0.04,
-    0.88, 0.16, 0.72, 0x8c754d
+  const torso = group(rig, [0, 1.51, 0]);
+
+  capsule(
+    torso,
+    cloth,
+    0.31,
+    0.35,
+    [0, 0.04, 0]
   );
 
-  // Manto.
-  const mantle = createBox(
-    playerVisual, 0, 1.18, -0.35,
-    0.72, 1.05, 0.16, 0x3b2433
+  // Peitoral sobre o tecido.
+  const chest = box(
+    torso,
+    armor,
+    [0.66, 0.54, 0.31],
+    [0, 0.03, -0.035]
   );
-  mantle.rotation.x = -0.08;
+
+  chest.rotation.z = -0.015;
+
+  // Placas e detalhes metálicos.
+  box(
+    torso,
+    MATERIALS.armorLight,
+    [0.2, 0.34, 0.06],
+    [-0.2, 0.04, -0.215]
+  );
+
+  box(
+    torso,
+    MATERIALS.armorLight,
+    [0.2, 0.34, 0.06],
+    [0.2, 0.04, -0.215]
+  );
+
+  box(
+    torso,
+    accent,
+    [0.075, 0.35, 0.025],
+    [0, -0.01, -0.205]
+  );
+
+  sphere(
+    torso,
+    MATERIALS.crystal,
+    0.075,
+    [0, 0.12, -0.25],
+    [1, 1.2, 0.6]
+  );
 
   // Ombros.
-  const shoulderL = addMesh(
-    new THREE.SphereGeometry(0.28, 10, 8),
-    armorLight,
-    playerVisual,
-    -0.55, 1.8, 0
+  sphere(
+    torso,
+    armor,
+    0.22,
+    [-0.4, 0.2, 0],
+    [1.15, 0.8, 1]
   );
 
-  const shoulderR = addMesh(
-    new THREE.SphereGeometry(0.28, 10, 8),
-    armorLight,
-    playerVisual,
-    0.55, 1.8, 0
+  sphere(
+    torso,
+    armor,
+    0.22,
+    [0.4, 0.2, 0],
+    [1.15, 0.8, 1]
   );
 
-  // Cabeça.
-  addMesh(
-    new THREE.SphereGeometry(0.3, 12, 10),
-    skin,
-    playerVisual,
-    0, 2.3, 0
+  sphere(
+    torso,
+    accent,
+    0.08,
+    [-0.43, 0.23, -0.12],
+    [1, 1, 0.65]
   );
 
-  // Capuz/cabelo.
-  const hood = addMesh(
-    new THREE.SphereGeometry(0.33, 10, 8),
+  sphere(
+    torso,
+    accent,
+    0.08,
+    [0.43, 0.23, -0.12],
+    [1, 1, 0.65]
+  );
+
+  // Capa.
+  const cape = box(
+    torso,
     cloth,
-    playerVisual,
-    0, 2.47, -0.05
+    [0.61, 0.85, 0.075],
+    [0, -0.29, 0.2]
   );
-  hood.scale.set(1, 0.8, 1);
+
+  cape.rotation.x = -0.08;
 
   // Braços.
-  const armL = createBox(
-    playerVisual, -0.57, 1.4, 0,
-    0.22, 0.7, 0.24, 0x3c4a58
+  const leftArm = group(torso, [-0.43, 0.12, 0]);
+  const rightArm = group(torso, [0.43, 0.12, 0]);
+
+  for (const arm of [leftArm, rightArm]) {
+    capsule(
+      arm,
+      cloth,
+      0.12,
+      0.25,
+      [0, -0.22, 0]
+    );
+
+    sphere(
+      arm,
+      armor,
+      0.145,
+      [0, -0.36, 0],
+      [1, 1.2, 0.95]
+    );
+
+    box(
+      arm,
+      armorLightSafe(),
+      [0.23, 0.24, 0.23],
+      [0, -0.4, -0.015]
+    );
+
+    capsule(
+      arm,
+      skin,
+      0.085,
+      0.14,
+      [0, -0.53, 0]
+    );
+  }
+
+  // Cabeça e pescoço.
+  cylinder(
+    torso,
+    skin,
+    0.105,
+    0.11,
+    0.17,
+    [0, 0.48, 0],
+    10
   );
 
-  const armR = createBox(
-    playerVisual, 0.57, 1.4, 0,
-    0.22, 0.7, 0.24, 0x3c4a58
+  const head = group(torso, [0, 0.69, 0]);
+
+  sphere(
+    head,
+    skin,
+    0.22,
+    [0, 0, 0],
+    [0.83, 1.1, 0.84]
   );
 
-  // Detalhes dourados.
-  createBox(
-    playerVisual, 0, 1.8, 0.37,
-    0.23, 0.32, 0.07, 0xc9a85e
+  // Cabelo e parte traseira da cabeça.
+  sphere(
+    head,
+    hair,
+    0.205,
+    [0, 0.09, 0.035],
+    [0.9, 0.75, 0.9]
   );
 
-  // Espada posicionada na mão direita.
-  swordPivot = new THREE.Group();
-  swordPivot.position.set(0.65, 1.3, 0);
-  playerVisual.add(swordPivot);
+  sphere(
+    head,
+    skin,
+    0.17,
+    [0, -0.04, -0.025],
+    [0.86, 0.93, 0.85]
+  );
 
-  sword = new THREE.Group();
-  swordPivot.add(sword);
+  // Franja.
+  const fringe = box(
+    head,
+    hair,
+    [0.29, 0.105, 0.13],
+    [0, 0.105, -0.13]
+  );
 
-  createBox(sword, 0, 0.43, 0, 0.09, 0.9, 0.12, 0xcbd9df);
-  createBox(sword, 0, 0.03, 0, 0.36, 0.09, 0.17, 0xc9a85e);
-  createBox(sword, 0, -0.22, 0, 0.12, 0.4, 0.14, 0x563b2a);
+  fringe.rotation.x = -0.16;
 
-  sword.rotation.z = -0.3;
+  // Olhos.
+  sphere(
+    head,
+    MATERIALS.eye,
+    0.025,
+    [-0.065, 0.01, -0.177],
+    [1.2, 0.65, 0.55]
+  );
 
-  playerVisual.userData.parts = {
+  sphere(
+    head,
+    MATERIALS.eye,
+    0.025,
+    [0.065, 0.01, -0.177],
+    [1.2, 0.65, 0.55]
+  );
+
+  // Proteções laterais do rosto.
+  box(
+    head,
+    armor,
+    [0.065, 0.19, 0.07],
+    [-0.19, -0.015, -0.035]
+  );
+
+  box(
+    head,
+    armor,
+    [0.065, 0.19, 0.07],
+    [0.19, -0.015, -0.035]
+  );
+
+  // Cinto e pequenas bolsas.
+  box(
+    rig,
+    MATERIALS.leather,
+    [0.61, 0.12, 0.36],
+    [0, 1.16, -0.005]
+  );
+
+  box(
+    rig,
+    accent,
+    [0.12, 0.12, 0.06],
+    [0, 1.16, -0.2]
+  );
+
+  box(
+    rig,
+    MATERIALS.leather,
+    [0.12, 0.17, 0.12],
+    [-0.25, 1.14, 0.02]
+  );
+
+  // Espada presa à mão direita.
+  const sword = group(rightArm, [0.02, -0.64, -0.02]);
+
+  cylinder(
+    sword,
+    MATERIALS.leather,
+    0.035,
+    0.035,
+    0.24,
+    [0, -0.06, 0],
+    8
+  );
+
+  box(
+    sword,
+    accent,
+    [0.29, 0.055, 0.065],
+    [0, 0.08, 0]
+  );
+
+  const blade = box(
+    sword,
+    MATERIALS.armorLight,
+    [0.105, 0.68, 0.035],
+    [0, 0.44, 0]
+  );
+
+  blade.rotation.z = -0.025;
+
+  const bladeTip = makeMesh(
+    new THREE.ConeGeometry(0.074, 0.19, 4),
+    MATERIALS.armorLight,
+    sword,
+    [0, 0.86, 0]
+  );
+
+  bladeTip.rotation.z = Math.PI;
+
+  // Pequeno cristal na guarda da arma.
+  sphere(
+    sword,
+    MATERIALS.crystal,
+    0.045,
+    [0, 0.08, -0.035]
+  );
+
+  return {
+    root,
+    rig,
+    torso,
+    head,
     leftLeg,
     rightLeg,
-    armL,
-    armR,
-    shoulderL,
-    shoulderR,
-    mantle,
+    leftArm,
+    rightArm,
+    cape,
+    sword,
+    type
   };
-
-  playerVisual.scale.setScalar(1);
 }
 
-function animatePlayer(delta) {
-  if (!playerVisual) return;
-
-  const parts = playerVisual.userData.parts;
-  const moving = getMoveVector().lengthSq() > 0.01;
-  const running = moving && keys.has("Shift");
-
-  if (playerData.dodgeTime > 0) {
-    playerVisual.position.y = Math.sin(
-      (playerData.dodgeTime / CONFIG.dodgeDuration) * Math.PI
-    ) * 0.18;
-  } else {
-    playerVisual.position.y = moving
-      ? Math.abs(Math.sin(state.playTime * (running ? 13 : 8))) * 0.06
-      : 0;
-  }
-
-  if (moving && playerData.dodgeTime <= 0) {
-    const swing = Math.sin(state.playTime * (running ? 13 : 8)) * 0.42;
-    parts.leftLeg.rotation.x = swing;
-    parts.rightLeg.rotation.x = -swing;
-    parts.armL.rotation.x = -swing * 0.7;
-    parts.armR.rotation.x = swing * 0.7;
-  } else {
-    parts.leftLeg.rotation.x = THREE.MathUtils.damp(
-      parts.leftLeg.rotation.x, 0, 8, delta
-    );
-    parts.rightLeg.rotation.x = THREE.MathUtils.damp(
-      parts.rightLeg.rotation.x, 0, 8, delta
-    );
-    parts.armL.rotation.x = THREE.MathUtils.damp(
-      parts.armL.rotation.x, 0, 8, delta
-    );
-    parts.armR.rotation.x = THREE.MathUtils.damp(
-      parts.armR.rotation.x, 0, 8, delta
-    );
-  }
-
-  if (attackAnimation > 0) {
-    const progress = 1 - attackAnimation / 0.38;
-    swordPivot.rotation.x = -Math.sin(progress * Math.PI) * 0.8;
-    swordPivot.rotation.z = -Math.sin(progress * Math.PI) * 1.7;
-  } else {
-    swordPivot.rotation.x = THREE.MathUtils.damp(
-      swordPivot.rotation.x, 0, 12, delta
-    );
-    swordPivot.rotation.z = THREE.MathUtils.damp(
-      swordPivot.rotation.z, 0, 12, delta
-    );
-  }
+function armorLightSafe() {
+  return MATERIALS.armorLight || MATERIALS.armor;
 }
 
-/* =========================================================
-   CRISTAIS E INTERAÇÃO
-========================================================= */
+function createPlayer() {
+  player = group(scene, [
+    WORLD.playerSpawn.x,
+    0,
+    WORLD.playerSpawn.z
+  ]);
 
-function createCrystals() {
+  playerModel = createHumanoid();
+
+  scene.remove(playerModel.root);
+  player.add(playerModel.root);
+
+  playerModel.root.position.set(0, 0, 0);
+  playerParts = playerModel;
+
+  // O eixo frontal do personagem é -Z.
+  player.rotation.y = 0;
+}
+
+/* ---------- Objetos interativos ---------- */
+
+function createWorldObjects() {
   const positions = [
-    [-15, 1, -10],
-    [18, 1, 12],
-    [-36, 1, 18],
-    [45, 1, -44],
-    [2, 1, -56],
+    [-4, 0, -4],
+    [5, 0, -10],
+    [-14, 0, 4],
+    [14, 0, 10],
+    [0, 0, -20],
+    [22, 0, -17],
+    [-22, 0, -15],
+    [7, 0, 22]
   ];
 
-  const crystalMaterial = new THREE.MeshStandardMaterial({
-    color: 0x55dfff,
-    emissive: 0x158cba,
-    emissiveIntensity: 2.4,
-    metalness: 0.25,
-    roughness: 0.2,
+  positions.forEach((position, index) => {
+    createCollectible(position, index);
   });
 
-  positions.forEach((pos, index) => {
-    const group = new THREE.Group();
-    group.position.set(pos[0], pos[1], pos[2]);
-
-    const crystal = addMesh(
-      new THREE.OctahedronGeometry(0.8, 0),
-      crystalMaterial.clone(),
-      group,
-      0, 0.5, 0
-    );
-
-    crystal.scale.set(0.75, 1.4, 0.75);
-    crystal.castShadow = true;
-
-    const ring = addMesh(
-      new THREE.TorusGeometry(1.05, 0.045, 8, 32),
-      makeMaterial(0x75e8ff, 0.25, {
-        emissive: 0x2089a9,
-        emissiveIntensity: 1.2,
-      }),
-      group,
-      0, 0.2, 0
-    );
-    ring.rotation.x = Math.PI / 2;
-
-    const light = new THREE.PointLight(0x38cfff, 2.2, 9);
-    light.position.y = 1;
-    group.add(light);
-
-    scene.add(group);
-
-    const data = {
-      id: `crystal-${index + 1}`,
-      group,
-      crystal,
-      ring,
-      light,
-      collected: false,
-      baseY: pos[1],
-      type: "crystal",
-      label: `Cristal ancestral ${index + 1}`,
-    };
-
-    crystals.push(data);
-    interactables.push(data);
-  });
+  createCampfire(-8, 0, 10);
+  createCampfire(11, 0, -3);
 }
 
-function createAncientAltar() {
-  const altar = new THREE.Group();
-  altar.position.set(30, 0, -25);
+function createCollectible(position, index) {
+  const root = group(scene, position);
 
-  createBox(altar, 0, 0.5, 0, 3.5, 1, 3.5, 0x6e7975);
-  createBox(altar, 0, 1.15, 0, 2.7, 0.3, 2.7, 0x87918a);
-
-  const core = addMesh(
-    new THREE.OctahedronGeometry(0.7, 0),
-    makeMaterial(0x75e8ff, 0.25, {
-      emissive: 0x238ab4,
-      emissiveIntensity: 2.4,
-    }),
-    altar,
-    0, 2.2, 0
+  cylinder(
+    root,
+    MATERIALS.stoneDark,
+    0.38,
+    0.48,
+    0.25,
+    [0, 0.12, 0],
+    8
   );
 
-  const light = new THREE.PointLight(0x49cfff, 3, 16);
-  light.position.set(0, 2.5, 0);
-  altar.add(light);
+  const crystal = makeMesh(
+    new THREE.OctahedronGeometry(0.42, 0),
+    MATERIALS.crystal,
+    root,
+    [0, 0.82, 0]
+  );
 
-  scene.add(altar);
+  crystal.scale.set(0.75, 1.35, 0.75);
 
-  const altarData = {
-    id: "ancient-altar",
-    group: altar,
-    crystal: core,
-    light,
-    type: "altar",
-    label: "Altar ancestral",
+  const glow = new THREE.PointLight(0x4bcdf4, 2, 5);
+  glow.position.set(0, 1, 0);
+  root.add(glow);
+
+  const ring = makeMesh(
+    new THREE.TorusGeometry(0.58, 0.025, 6, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0x5ed9f2,
+      transparent: true,
+      opacity: 0.6
+    }),
+    root,
+    [0, 0.3, 0]
+  );
+
+  ring.rotation.x = Math.PI / 2;
+
+  collectibles.push({
+    root,
+    crystal,
+    ring,
+    index,
     collected: false,
-  };
-
-  interactables.push(altarData);
+    baseY: 0.82,
+    type: "crystal",
+    name: "Fragmento de Veyra",
+    description: "Um fragmento de energia antiga.",
+    gold: 5 + index * 2
+  });
 }
 
-/* =========================================================
-   INIMIGOS E CHEFE
-========================================================= */
+function createCampfire(x, y, z) {
+  const root = group(scene, [x, y, z]);
 
-function createEnemy(position, type = "mist") {
-  const isStone = type === "stone";
-  const enemy = new THREE.Group();
-
-  enemy.position.set(position[0], 0, position[1]);
-
-  const bodyColor = isStone ? 0x59636b : 0x25394c;
-  const bodyMaterial = makeMaterial(bodyColor, 0.75, {
-    emissive: isStone ? 0x111820 : 0x12324a,
-    emissiveIntensity: 0.45,
-  });
-
-  const body = addMesh(
-    new THREE.CapsuleGeometry(isStone ? 0.65 : 0.42, isStone ? 0.9 : 0.55, 4, 8),
-    bodyMaterial,
-    enemy,
-    0, isStone ? 1.2 : 1, 0
-  );
-
-  body.castShadow = true;
-
-  const head = addMesh(
-    new THREE.SphereGeometry(isStone ? 0.42 : 0.32, 10, 8),
-    makeMaterial(isStone ? 0x78858a : 0x394f61, 0.65, {
-      emissive: 0x172d3a,
-      emissiveIntensity: 0.5,
-    }),
-    enemy,
-    0, isStone ? 2.15 : 1.8, 0
-  );
-
-  head.castShadow = true;
-
-  const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xff5068 });
-
-  for (const x of [-0.13, 0.13]) {
-    addMesh(
-      new THREE.SphereGeometry(0.055, 8, 6),
-      eyeMaterial,
-      enemy,
-      x, isStone ? 2.2 : 1.85, 0.28
+  for (let i = 0; i < 4; i++) {
+    const log = cylinder(
+      root,
+      MATERIALS.wood,
+      0.09,
+      0.09,
+      1.1,
+      [0, 0.12, 0],
+      7
     );
+
+    log.rotation.z = Math.PI / 2;
+    log.rotation.y = i * Math.PI / 2;
   }
 
-  const scale = isStone ? 1.25 : 1;
+  const flameMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffa74b,
+    transparent: true,
+    opacity: 0.85
+  });
 
-  enemy.scale.setScalar(scale);
-  scene.add(enemy);
+  const flame = makeMesh(
+    new THREE.ConeGeometry(0.3, 0.85, 7),
+    flameMaterial,
+    root,
+    [0, 0.58, 0]
+  );
 
-  const data = {
-    id: `enemy-${enemies.length + 1}`,
-    mesh: enemy,
-    type,
-    hp: isStone ? 100 : 45,
-    maxHp: isStone ? 100 : 45,
-    attack: isStone ? 16 : 10,
-    defense: isStone ? 5 : 1,
-    speed: isStone ? 2.3 : 3.4,
-    range: isStone ? 2.7 : 2.1,
-    cooldown: random(0.5, 1.5),
-    thinkTimer: random(0, 0.2),
-    home: new THREE.Vector3(position[0], 0, position[1]),
-    state: "idle",
-    dead: false,
-    hitFlash: 0,
-    phase: 1,
-    isBoss: false,
-    rewardXP: isStone ? 45 : 25,
-    rewardGold: isStone ? 15 : 7,
-    body,
-    head,
-  };
+  const light = new THREE.PointLight(0xff873c, 3, 9);
+  light.position.set(0, 0.8, 0);
+  root.add(light);
 
-  enemies.push(data);
-  return data;
+  npcs.push({
+    root,
+    name: "Fogueira antiga",
+    interact: () => {
+      if (state.health < state.maxHealth || state.mana < state.maxMana) {
+        state.health = Math.min(state.maxHealth, state.health + 25);
+        state.mana = Math.min(state.maxMana, state.mana + 30);
+        updateHUD();
+        showToast("Você recuperou parte de sua energia.");
+      } else {
+        showToast("Sua energia já está restaurada.");
+      }
+    },
+    range: 3.2
+  });
 }
+
+/* ---------- Inimigos ---------- */
 
 function createEnemies() {
-  [
-    [-10, -17, "mist"],
-    [16, -20, "mist"],
-    [-28, 10, "mist"],
-    [25, 25, "mist"],
-    [-45, -25, "stone"],
-    [48, 15, "stone"],
-    [0, 42, "mist"],
-    [58, -40, "mist"],
-  ].forEach(([x, z, type]) => createEnemy([x, z], type));
+  const positions = [
+    [-9, 0, -12],
+    [10, 0, -19],
+    [20, 0, 3],
+    [-19, 0, 11],
+    [3, 0, 24]
+  ];
+
+  positions.forEach((position, index) => {
+    createEnemy(position, index);
+  });
 }
 
-function createBoss() {
-  if (boss || state.bossDefeated) return;
+function createEnemy(position, index) {
+  const enemy = group(scene, position);
 
-  const mesh = new THREE.Group();
-  mesh.position.set(30, 0, -38);
-  scene.add(mesh);
-
-  const bodyMaterial = makeMaterial(0x443c50, 0.5, {
-    emissive: 0x2b102c,
-    emissiveIntensity: 1,
+  const model = createHumanoid({
+    type: "enemy",
+    scale: 0.95,
+    skin: material("enemySkin", 0x77505b, 0.85),
+    armor: MATERIALS.enemyArmor,
+    cloth: MATERIALS.enemy,
+    accent: material("enemyAccent", 0x9b526a, 0.4, 0.4),
+    hair: material("enemyHair", 0x201722, 0.8)
   });
 
-  const body = addMesh(
-    new THREE.CapsuleGeometry(1.15, 1.9, 5, 12),
-    bodyMaterial,
-    mesh,
-    0, 2, 0
+  scene.remove(model.root);
+  enemy.add(model.root);
+
+  model.root.position.set(0, 0, 0);
+
+  // Elmo com pontas.
+  sphere(
+    model.head,
+    MATERIALS.enemyArmor,
+    0.21,
+    [0, 0.11, 0],
+    [1.1, 0.6, 1]
   );
-  body.castShadow = true;
-
-  const head = addMesh(
-    new THREE.IcosahedronGeometry(0.9, 1),
-    makeMaterial(0x635168, 0.5, {
-      emissive: 0x661c53,
-      emissiveIntensity: 1.4,
-    }),
-    mesh,
-    0, 4.1, 0
-  );
-
-  head.castShadow = true;
-
-  const hornsMaterial = makeMaterial(0x8b9ba3, 0.4);
 
   for (const side of [-1, 1]) {
-    const horn = addMesh(
-      new THREE.ConeGeometry(0.25, 1.5, 7),
-      hornsMaterial,
-      mesh,
-      side * 0.7, 4.9, 0
+    const horn = makeMesh(
+      new THREE.ConeGeometry(0.075, 0.38, 6),
+      MATERIALS.bone,
+      model.head,
+      [side * 0.16, 0.26, 0]
     );
 
-    horn.rotation.z = side * -0.55;
-
-    const arm = addMesh(
-      new THREE.CapsuleGeometry(0.32, 1.3, 4, 8),
-      bodyMaterial,
-      mesh,
-      side * 1.35, 2.4, 0
-    );
-
-    arm.rotation.z = side * 0.25;
-    arm.castShadow = true;
+    horn.rotation.z = side * -0.35;
   }
 
-  const eyes = new THREE.MeshBasicMaterial({ color: 0xff334e });
+  // Olhos vermelhos.
+  const redEye = material("redEye", 0xff526e, 0.2, 0);
 
-  for (const x of [-0.35, 0.35]) {
-    addMesh(
-      new THREE.SphereGeometry(0.12, 8, 8),
-      eyes,
-      mesh,
-      x, 4.15, 0.78
+  sphere(
+    model.head,
+    redEye,
+    0.028,
+    [-0.065, 0.01, -0.18]
+  );
+
+  sphere(
+    model.head,
+    redEye,
+    0.028,
+    [0.065, 0.01, -0.18]
+  );
+
+  // Arma do inimigo.
+  box(
+    model.rightArm,
+    MATERIALS.darkSteel,
+    [0.08, 0.75, 0.08],
+    [0, -0.8, -0.03]
+  );
+
+  const healthBar = makeEnemyHealthBar(enemy);
+
+  enemies.push({
+    root: enemy,
+    model,
+    health: 55 + index * 8,
+    maxHealth: 55 + index * 8,
+    alive: true,
+    aggro: false,
+    attackTimer: 0,
+    speed: 1.1 + Math.random() * 0.5,
+    phase: Math.random() * 5,
+    healthBar,
+    index,
+    hitFlash: 0
+  });
+}
+
+function makeEnemyHealthBar(parent) {
+  const holder = group(parent, [0, 2.7, 0]);
+
+  const back = makeMesh(
+    new THREE.PlaneGeometry(1.1, 0.1),
+    new THREE.MeshBasicMaterial({ color: 0x23141c }),
+    holder
+  );
+
+  const fill = makeMesh(
+    new THREE.PlaneGeometry(1.04, 0.055),
+    new THREE.MeshBasicMaterial({ color: 0xcf5364 }),
+    holder,
+    [0, 0, 0.01]
+  );
+
+  return { holder, fill, back };
+}
+
+/* ---------- NPC ---------- */
+
+function createNPCs() {
+  const npcRoot = group(scene, [-3, 0, -17]);
+
+  const model = createHumanoid({
+    scale: 1.03,
+    skin: material("npcSkin", 0xc3926e, 0.85),
+    armor: material("npcArmor", 0x5a594d, 0.55, 0.4),
+    cloth: material("npcCloth", 0x3c4d58, 0.9),
+    accent: MATERIALS.gold,
+    hair: material("npcHair", 0xaaa08a, 0.8)
+  });
+
+  scene.remove(model.root);
+  npcRoot.add(model.root);
+
+  model.root.position.set(0, 0, 0);
+
+  // Cajado do ancião.
+  const staff = cylinder(
+    model.leftArm,
+    MATERIALS.wood,
+    0.045,
+    0.065,
+    1.8,
+    [0, -0.8, 0],
+    8
+  );
+
+  staff.rotation.z = -0.08;
+
+  sphere(
+    model.leftArm,
+    MATERIALS.crystal,
+    0.12,
+    [0, 0.12, 0]
+  );
+
+  npcs.push({
+    root: npcRoot,
+    model,
+    name: "Ancião de Veyra",
+    range: 3.5,
+    interact: () => {
+      openDialogue({
+        speaker: "ANCIÃO DE VEYRA",
+        title: "As ruínas despertaram",
+        text: "Viajante, os cristais voltaram a brilhar. Há muito tempo, essas terras foram protegidas por uma antiga ordem. Colete os fragmentos e prepare-se para enfrentar o guardião.",
+        choices: [
+          {
+            text: "Vou descobrir o que aconteceu.",
+            action: () => {
+              setQuest(
+                "Fragmentos esquecidos",
+                "Reúna os fragmentos de energia espalhados pelas ruínas.",
+                `Fragmentos coletados: ${state.crystals} / 3`
+              );
+              showToast("Nova missão: Fragmentos esquecidos");
+            }
+          },
+          {
+            text: "Preciso recuperar minhas forças.",
+            action: () => {
+              state.health = state.maxHealth;
+              state.mana = state.maxMana;
+              updateHUD();
+              showToast("Sua energia foi restaurada.");
+            }
+          }
+        ]
+      });
+    }
+  });
+}
+
+/* ---------- Chefe ---------- */
+
+function createBoss() {
+  const root = group(scene, [0, 0, -35]);
+
+  const model = createHumanoid({
+    type: "boss",
+    scale: 1.9,
+    skin: material("bossSkin", 0x55405f, 0.55),
+    armor: MATERIALS.boss,
+    cloth: material("bossCloth", 0x151320, 0.8),
+    accent: MATERIALS.crystal,
+    hair: material("bossHair", 0x100e18, 0.8)
+  });
+
+  scene.remove(model.root);
+  root.add(model.root);
+
+  model.root.position.set(0, 0, 0);
+
+  // Coroa quebrada.
+  for (let i = 0; i < 5; i++) {
+    const angle = (i / 5) * Math.PI * 2;
+
+    const spike = makeMesh(
+      new THREE.ConeGeometry(0.12, 0.75, 5),
+      MATERIALS.bossMetal,
+      model.head,
+      [
+        Math.cos(angle) * 0.22,
+        0.35 + (i % 2) * 0.08,
+        Math.sin(angle) * 0.12
+      ]
     );
+
+    spike.rotation.z = Math.cos(angle) * -0.4;
+    spike.rotation.x = Math.sin(angle) * 0.35;
   }
+
+  // Ombreiras maiores.
+  sphere(
+    model.torso,
+    MATERIALS.bossMetal,
+    0.3,
+    [-0.43, 0.2, 0],
+    [1.5, 0.9, 1]
+  );
+
+  sphere(
+    model.torso,
+    MATERIALS.bossMetal,
+    0.3,
+    [0.43, 0.2, 0],
+    [1.5, 0.9, 1]
+  );
+
+  // Aura.
+  const aura = new THREE.PointLight(0x714ad9, 6, 14);
+  aura.position.set(0, 2.2, 0);
+  root.add(aura);
 
   boss = {
-    id: "corrupted-guardian",
-    mesh,
-    body,
-    head,
-    hp: 650,
-    maxHp: 650,
-    attack: 22,
-    defense: 5,
-    speed: 2.6,
-    range: 4,
-    cooldown: 2,
-    thinkTimer: 0,
-    home: new THREE.Vector3(30, 0, -38),
-    state: "idle",
-    dead: false,
-    hitFlash: 0,
-    phase: 1,
-    isBoss: true,
-    rewardXP: 300,
-    rewardGold: 150,
-    telegraph: 0,
-    attackType: "",
-    attackDuration: 0,
+    root,
+    model,
+    health: 600,
+    maxHealth: 600,
+    active: false,
+    defeated: false,
+    attackTimer: 2,
+    aura,
+    phase: 1
   };
-
-  state.bossSpawned = true;
-
-  showToast("O Guardião Corrompido despertou!");
-  showMessage("Uma presença ancestral emerge das ruínas.");
-  updateHUD();
 }
 
-/* =========================================================
-   MOVIMENTO, CÂMERA E COLISÕES
-========================================================= */
+/* ---------- Controles e eventos ---------- */
 
-function getMoveVector() {
-  const vector = new THREE.Vector3();
-
-  if (keys.has("KeyW") || touchMoves.has("forward")) vector.z -= 1;
-  if (keys.has("KeyS") || touchMoves.has("backward")) vector.z += 1;
-  if (keys.has("KeyA") || touchMoves.has("left")) vector.x -= 1;
-  if (keys.has("KeyD") || touchMoves.has("right")) vector.x += 1;
-
-  if (vector.lengthSq() > 0) vector.normalize();
-
-  return vector;
-}
-
-function getCameraForward() {
-  return new THREE.Vector3(
-    -Math.sin(cameraState.yaw),
-    0,
-    -Math.cos(cameraState.yaw)
-  ).normalize();
-}
-
-function getCameraRight() {
-  return new THREE.Vector3(
-    Math.cos(cameraState.yaw),
-    0,
-    -Math.sin(cameraState.yaw)
-  ).normalize();
-}
-
-function getWorldMoveVector() {
-  const local = getMoveVector();
-
-  const forward = getCameraForward();
-  const right = getCameraRight();
-
-  return forward.multiplyScalar(-local.z)
-    .add(right.multiplyScalar(local.x))
-    .normalize();
-}
-
-function collidesAt(x, z, radius = 0.65) {
-  const limit = CONFIG.worldSize / 2 - 3;
-
-  if (x < -limit || x > limit || z < -limit || z > limit) {
-    return true;
-  }
-
-  for (const collider of colliders) {
-    const dx = x - collider.x;
-    const dz = z - collider.z;
-    const minimum = radius + collider.radius;
-
-    if (dx * dx + dz * dz < minimum * minimum) {
-      return true;
-    }
-  }
-
-  // Colisão aproximada com inimigos grandes.
-  return false;
-}
-
-function moveWithCollisions(object, dx, dz, radius = 0.65) {
-  const nextX = object.position.x + dx;
-  const nextZ = object.position.z + dz;
-
-  if (!collidesAt(nextX, object.position.z, radius)) {
-    object.position.x = nextX;
-  }
-
-  if (!collidesAt(object.position.x, nextZ, radius)) {
-    object.position.z = nextZ;
-  }
-
-  object.position.x = clamp(
-    object.position.x,
-    -CONFIG.worldSize / 2 + 3,
-    CONFIG.worldSize / 2 - 3
-  );
-
-  object.position.z = clamp(
-    object.position.z,
-    -CONFIG.worldSize / 2 + 3,
-    CONFIG.worldSize / 2 - 3
-  );
-}
-
-function updatePlayer(delta) {
-  if (playerData.dead) return;
-
-  playerData.invulnerable = Math.max(
-    0, playerData.invulnerable - delta
-  );
-
-  playerData.attackCooldown = Math.max(
-    0, playerData.attackCooldown - delta
-  );
-
-  playerData.dodgeCooldown = Math.max(
-    0, playerData.dodgeCooldown - delta
-  );
-
-  playerData.dodgeTime = Math.max(
-    0, playerData.dodgeTime - delta
-  );
-
-  if (attackAnimation > 0) {
-    attackAnimation = Math.max(0, attackAnimation - delta);
-  }
-
-  const movement = getWorldMoveVector();
-
-  if (playerData.dodgeTime > 0) {
-    const dodgeSpeed = 18;
-    const dodgeDirection = movement.lengthSq() > 0
-      ? movement
-      : getCameraForward();
-
-    moveWithCollisions(
-      player,
-      dodgeDirection.x * dodgeSpeed * delta,
-      dodgeDirection.z * dodgeSpeed * delta
-    );
-  } else if (movement.lengthSq() > 0) {
-    const running = keys.has("Shift");
-    const speed = playerData.speed *
-      (running ? CONFIG.runMultiplier : 1);
-
-    moveWithCollisions(
-      player,
-      movement.x * speed * delta,
-      movement.z * speed * delta
-    );
-
-    player.rotation.y = Math.atan2(movement.x, movement.z);
-  }
-
-  // Regeneração gradual de energia.
-  playerData.mana = Math.min(
-    playerData.maxMana,
-    playerData.mana + delta * 2.2
-  );
-
-  animatePlayer(delta);
-  updateCamera(delta);
-}
-
-function updateCamera(delta) {
-  const target = player.position.clone();
-  target.y += 1.65;
-
-  const pitch = clamp(cameraState.pitch, -0.1, 0.85);
-
-  const horizontal = Math.cos(pitch) * cameraState.distance;
-  const vertical = Math.sin(pitch) * cameraState.distance;
-
-  const desired = new THREE.Vector3(
-    target.x + Math.sin(cameraState.yaw) * horizontal,
-    target.y + vertical,
-    target.z + Math.cos(cameraState.yaw) * horizontal
-  );
-
-  camera.position.lerp(desired, 1 - Math.exp(-8 * delta));
-  camera.lookAt(target);
-}
-
-/* =========================================================
-   COMBATE
-========================================================= */
-
-function attack() {
-  if (
-    !state.running ||
-    state.paused ||
-    state.ended ||
-    state.inventoryOpen ||
-    state.mapOpen ||
-    state.skillsOpen ||
-    state.settingsOpen ||
-    state.dialogueOpen ||
-    playerData.dead
-  ) {
-    return;
-  }
-
-  if (playerData.attackCooldown > 0 || playerData.dodgeTime > 0) {
-    return;
-  }
-
-  playerData.attackCooldown = CONFIG.attackCooldown;
-  attackAnimation = 0.38;
-
-  showMessage("A lâmina ancestral corta a névoa.");
-
-  const candidates = [...enemies.filter((e) => !e.dead)];
-
-  if (boss && !boss.dead) candidates.push(boss);
-
-  let target = null;
-  let bestScore = Infinity;
-
-  const forward = new THREE.Vector3(
-    Math.sin(player.rotation.y),
-    0,
-    Math.cos(player.rotation.y)
-  );
-
-  for (const enemy of candidates) {
-    const dx = enemy.mesh.position.x - player.position.x;
-    const dz = enemy.mesh.position.z - player.position.z;
-    const distance = Math.sqrt(dx * dx + dz * dz);
-
-    const direction = new THREE.Vector3(dx, 0, dz).normalize();
-    const facing = forward.dot(direction);
-
-    if (distance > CONFIG.attackRange + (enemy.isBoss ? 1.5 : 0)) {
-      continue;
-    }
-
-    if (facing < -0.25) continue;
-
-    const score = distance - facing * 0.5;
-
-    if (score < bestScore) {
-      bestScore = score;
-      target = enemy;
-    }
-  }
-
-  if (!target) {
-    showToast("Você não alcançou nenhum inimigo.");
-    return;
-  }
-
-  const critical = Math.random() < 0.1;
-  const rawDamage = playerData.attack * (critical ? 1.8 : 1);
-  const damage = Math.max(1, Math.round(rawDamage - target.defense));
-
-  damageEnemy(target, damage);
-
-  if (critical) {
-    showToast(`Golpe crítico! ${damage} de dano`);
-  } else {
-    showToast(`${damage} de dano`);
-  }
-}
-
-function damageEnemy(enemy, damage) {
-  if (!enemy || enemy.dead) return;
-
-  enemy.hp = Math.max(0, enemy.hp - damage);
-  enemy.hitFlash = 0.18;
-  enemy.state = enemy.hp <= 0 ? "dead" : "hurt";
-
-  // Pequeno recuo ao receber dano.
-  if (!enemy.isBoss) {
-    const away = enemy.mesh.position.clone().sub(player.position);
-    away.y = 0;
-
-    if (away.lengthSq() > 0.001) {
-      away.normalize();
-
-      const nextX = enemy.mesh.position.x + away.x * 0.25;
-      const nextZ = enemy.mesh.position.z + away.z * 0.25;
-
-      if (!collidesAt(nextX, nextZ, enemy.type === "stone" ? 0.9 : 0.55)) {
-        enemy.mesh.position.x = nextX;
-        enemy.mesh.position.z = nextZ;
-      }
-    }
-  }
-
-  if (enemy.isBoss) {
-    if (enemy.hp <= enemy.maxHp * 0.5 && enemy.phase === 1) {
-      enemy.phase = 2;
-      enemy.speed *= 1.35;
-      enemy.attack *= 1.25;
-      showToast("O guardião entra em fúria!");
-    }
-
-    updateHUD();
-  }
-
-  if (enemy.hp <= 0) {
-    killEnemy(enemy);
-  }
-}
-
-function killEnemy(enemy) {
-  if (enemy.dead) return;
-
-  enemy.dead = true;
-  enemy.state = "dead";
-
-  if (enemy.isBoss) {
-    state.bossDefeated = true;
-    state.ended = true;
-    state.running = false;
-
-    enemy.mesh.visible = false;
-
-    playerData.xp += enemy.rewardXP;
-    playerData.gold += enemy.rewardGold;
-    processLevelUps();
-
-    updateHUD();
-    saveGame();
-
-    setScreen(ui.endScreen, true);
-    if (ui.endTitle) ui.endTitle.textContent = "O Reino Renascido";
-    if (ui.endDescription) {
-      ui.endDescription.textContent =
-        "O Guardião Corrompido caiu. A névoa começa a desaparecer " +
-        "e os ecos ancestrais voltam a percorrer Veyra. " +
-        "Sua jornada, porém, está apenas começando.";
-    }
-
-    showMessage("Você restaurou o equilíbrio de Veyra.");
-    return;
-  }
-
-  enemy.mesh.visible = false;
-  playerData.xp += enemy.rewardXP;
-  playerData.gold += enemy.rewardGold;
-
-  showToast(`Inimigo derrotado! +${enemy.rewardXP} XP`);
-  processLevelUps();
-  updateHUD();
-}
-
-function damagePlayer(amount) {
-  if (
-    playerData.dead ||
-    playerData.invulnerable > 0 ||
-    playerData.dodgeTime > 0
-  ) {
-    return;
-  }
-
-  const damage = Math.max(1, amount - playerData.defense);
-
-  playerData.hp = Math.max(0, playerData.hp - damage);
-  playerData.invulnerable = 0.75;
-
-  showToast(`Você recebeu ${damage} de dano.`);
-  updateHUD();
-
-  if (playerData.hp <= 0) {
-    defeatPlayer();
-  }
-}
-
-function defeatPlayer() {
-  if (playerData.dead) return;
-
-  playerData.dead = true;
-  state.running = false;
-  state.ended = true;
-
-  saveGame();
-
-  setScreen(ui.endScreen, true);
-
-  if (ui.endTitle) ui.endTitle.textContent = "A Névoa Venceu";
-  if (ui.endDescription) {
-    ui.endDescription.textContent =
-      "O guardião caiu diante das forças corrompidas. " +
-      "Você pode tentar novamente e continuar a explorar Veyra.";
-  }
-}
-
-function dodge() {
-  if (
-    !state.running ||
-    state.paused ||
-    state.ended ||
-    playerData.dead ||
-    playerData.dodgeCooldown > 0 ||
-    playerData.dodgeTime > 0
-  ) {
-    return;
-  }
-
-  playerData.dodgeTime = CONFIG.dodgeDuration;
-  playerData.dodgeCooldown = CONFIG.dodgeCooldown;
-  playerData.invulnerable = CONFIG.dodgeDuration;
-
-  showMessage("Você se esquiva.");
-}
-
-function useSpecialSkill() {
-  if (!state.running || state.paused || state.ended || playerData.dead) {
-    return;
-  }
-
-  if (playerData.mana < 20) {
-    showToast("Energia insuficiente.");
-    return;
-  }
-
-  playerData.mana -= 20;
-
-  const radius = 7;
-  let hits = 0;
-
-  for (const enemy of enemies) {
-    if (enemy.dead) continue;
-
-    if (distanceXZ(player.position, enemy.mesh.position) <= radius) {
-      damageEnemy(enemy, Math.max(10, playerData.attack * 1.5));
-      hits++;
-    }
-  }
-
-  if (boss && !boss.dead &&
-      distanceXZ(player.position, boss.mesh.position) <= radius) {
-    damageEnemy(boss, Math.max(10, playerData.attack * 1.5));
-    hits++;
-  }
-
-  const burst = new THREE.Mesh(
-    new THREE.TorusGeometry(3.5, 0.12, 8, 48),
-    new THREE.MeshBasicMaterial({
-      color: 0x75e8ff,
-      transparent: true,
-      opacity: 0.9,
-    })
-  );
-
-  burst.rotation.x = Math.PI / 2;
-  burst.position.set(player.position.x, 0.3, player.position.z);
-  scene.add(burst);
-
-  let age = 0;
-
-  function animateBurst() {
-    if (!scene || !burst.parent) return;
-
-    age += 0.04;
-    burst.scale.setScalar(1 + age);
-    burst.material.opacity = Math.max(0, 0.9 - age);
-
-    if (age >= 1) {
-      scene.remove(burst);
-      burst.geometry.dispose();
-      burst.material.dispose();
-      return;
-    }
-
-    requestAnimationFrame(animateBurst);
-  }
-
-  animateBurst();
-
-  showToast(
-    hits ? `Explosão ancestral! ${hits} alvo(s) atingido(s).`
-      : "A energia ancestral se dissipa."
-  );
-
-  updateHUD();
-}
-
-/* =========================================================
-   IA DOS INIMIGOS
-========================================================= */
-
-function updateEnemies(delta) {
-  enemyThinkTimer -= delta;
-
-  const updateDecisions = enemyThinkTimer <= 0;
-
-  if (updateDecisions) {
-    enemyThinkTimer = CONFIG.enemyThinkInterval;
-  }
-
-  for (const enemy of enemies) {
-    if (enemy.dead) continue;
-
-    enemy.cooldown = Math.max(0, enemy.cooldown - delta);
-    enemy.hitFlash = Math.max(0, enemy.hitFlash - delta);
-
-    if (enemy.hitFlash > 0) {
-      enemy.mesh.scale.setScalar(
-        (enemy.type === "stone" ? 1.25 : 1) * 1.04
-      );
-    } else {
-      enemy.mesh.scale.setScalar(
-        enemy.type === "stone" ? 1.25 : 1
-      );
-    }
-
-    if (playerData.dead) continue;
-
-    const dist = distanceXZ(player.position, enemy.mesh.position);
-    const homeDist = distanceXZ(enemy.home, enemy.mesh.position);
-
-    if (updateDecisions) {
-      if (dist < 19 && homeDist < 32) {
-        enemy.state = dist <= enemy.range ? "attack" : "chase";
-      } else if (homeDist > 2.5) {
-        enemy.state = "return";
-      } else {
-        enemy.state = "idle";
-      }
-    }
-
-    if (enemy.state === "chase" || enemy.state === "return") {
-      const target = enemy.state === "return"
-        ? enemy.home
-        : player.position;
-
-      const direction = new THREE.Vector3(
-        target.x - enemy.mesh.position.x,
-        0,
-        target.z - enemy.mesh.position.z
-      );
-
-      if (direction.lengthSq() > 0.1) {
-        direction.normalize();
-
-        const speed = enemy.speed *
-          (enemy.state === "return" ? 1.1 : 1);
-
-        const nx = enemy.mesh.position.x + direction.x * speed * delta;
-        const nz = enemy.mesh.position.z + direction.z * speed * delta;
-
-        if (!collidesAt(nx, nz, enemy.type === "stone" ? 0.9 : 0.55)) {
-          enemy.mesh.position.x = nx;
-          enemy.mesh.position.z = nz;
-        }
-
-        enemy.mesh.rotation.y = Math.atan2(direction.x, direction.z);
-      }
-    }
-
-    if (enemy.state === "attack" && enemy.cooldown <= 0 && dist <= enemy.range + 0.5) {
-      enemy.cooldown = enemy.type === "stone" ? 1.8 : 1.25;
-
-      if (Math.random() > 0.15) {
-        damagePlayer(enemy.attack);
-      }
-    }
-  }
-
-  if (boss && !boss.dead) {
-    updateBoss(delta);
-  }
-}
-
-function updateBoss(delta) {
-  boss.cooldown = Math.max(0, boss.cooldown - delta);
-  boss.telegraph = Math.max(0, boss.telegraph - delta);
-
-  const dist = distanceXZ(player.position, boss.mesh.position);
-
-  if (dist > 35) {
-    boss.state = "idle";
-    return;
-  }
-
-  if (dist > boss.range && boss.cooldown <= 0) {
-    const direction = player.position.clone().sub(boss.mesh.position);
-    direction.y = 0;
-
-    if (direction.lengthSq() > 0.1) {
-      direction.normalize();
-
-      const nx = boss.mesh.position.x + direction.x * boss.speed * delta;
-      const nz = boss.mesh.position.z + direction.z * boss.speed * delta;
-
-      if (!collidesAt(nx, nz, 1.5)) {
-        boss.mesh.position.x = nx;
-        boss.mesh.position.z = nz;
-      }
-
-      boss.mesh.rotation.y = Math.atan2(direction.x, direction.z);
-    }
-  }
-
-  if (boss.cooldown <= 0) {
-    boss.cooldown = boss.phase === 1 ? 2.4 : 1.65;
-    boss.attackType = Math.random() < 0.5 ? "melee" : "area";
-    boss.telegraph = 0.7;
-    boss.state = "telegraph";
-
-    showMessage(
-      boss.attackType === "area"
-        ? "O guardião prepara uma explosão! Afaste-se!"
-        : "O guardião prepara um golpe devastador!"
-    );
-  }
-
-  if (boss.telegraph > 0) {
-    if (boss.attackType === "area") {
-      boss.mesh.scale.setScalar(
-        1 + Math.sin(state.playTime * 18) * 0.04
-      );
-    }
-
-    return;
-  }
-
-  boss.mesh.scale.setScalar(1);
-
-  if (boss.state === "telegraph") {
-    boss.state = "attack";
-
-    const distance = distanceXZ(player.position, boss.mesh.position);
-
-    if (boss.attackType === "melee") {
-      if (distance <= boss.range + 1) {
-        damagePlayer(boss.attack);
-      }
-    } else if (distance <= (boss.phase === 2 ? 10 : 7)) {
-      damagePlayer(boss.attack * 1.3);
-    }
-
-    boss.cooldown = boss.phase === 1 ? 2.1 : 1.5;
-    boss.state = "chase";
-  }
-}
-
-/* =========================================================
-   MISSÃO E PROGRESSÃO
-========================================================= */
-
-function processLevelUps() {
-  while (playerData.xp >= playerData.xpNext) {
-    playerData.xp -= playerData.xpNext;
-    playerData.level++;
-    playerData.xpNext = Math.floor(playerData.xpNext * 1.45);
-    playerData.skillPoints++;
-
-    playerData.maxHp += 15;
-    playerData.maxMana += 5;
-    playerData.attack += 3;
-
-    playerData.hp = playerData.maxHp;
-    playerData.mana = playerData.maxMana;
-
-    showToast(`Nível ${playerData.level}! +1 ponto de habilidade`);
-  }
-
-  updateHUD();
-}
-
-function updateQuest() {
-  if (state.crystals < 5) {
-    setQuest(
-      "O chamado antigo",
-      "Explore a ilha esquecida, encontre os cristais ancestrais e descubra a origem da corrupção.",
-      `Cristais: ${state.crystals} / 5`
-    );
-  } else if (!state.bossDefeated) {
-    setQuest(
-      "O guardião corrompido",
-      "Os cinco cristais ressoam juntos. Encontre o guardião nas ruínas do altar e encerre a corrupção.",
-      "Objetivo: Derrote o Guardião Corrompido"
-    );
-  } else {
-    setQuest(
-      "Ecos restaurados",
-      "A corrupção recuou. Os segredos de Veyra aguardam uma nova jornada.",
-      "Missão principal concluída"
-    );
-  }
-}
-
-function collectCrystal(crystal) {
-  if (crystal.collected) return;
-
-  crystal.collected = true;
-  crystal.group.visible = false;
-  state.crystals++;
-
-  playerData.xp += 20;
-  playerData.mana = Math.min(
-    playerData.maxMana,
-    playerData.mana + 10
-  );
-
-  processLevelUps();
-  updateQuest();
-
-  showToast(`Cristal ancestral obtido (${state.crystals}/5)`);
-  showMessage("A energia do cristal percorre sua espada.");
-
-  if (state.crystals >= 5 && !state.bossSpawned && !state.bossDefeated) {
-    createBoss();
-    setQuest(
-      "O guardião corrompido",
-      "Os cinco cristais despertaram o antigo guardião. Prepare-se para a batalha.",
-      "Objetivo: Derrote o Guardião Corrompido"
-    );
-  }
-
-  updateHUD();
-}
-
-function interact() {
-  if (!state.running || state.paused || state.ended || playerData.dead) {
-    return;
-  }
-
-  if (!selectedInteractable) {
-    showToast("Não há nada para interagir por perto.");
-    return;
-  }
-
-  if (selectedInteractable.type === "crystal") {
-    collectCrystal(selectedInteractable);
-    return;
-  }
-
-  if (selectedInteractable.type === "altar") {
-    if (state.crystals < 5) {
-      showToast(`O altar exige cinco cristais. Você possui ${state.crystals}.`);
-    } else if (!state.bossSpawned && !state.bossDefeated) {
-      createBoss();
-    } else {
-      showToast("O altar ressoa com a energia ancestral.");
-    }
-  }
-}
-
-function updateInteractions() {
-  let nearest = null;
-  let nearestDistance = Infinity;
-
-  for (const item of interactables) {
-    if (item.collected || !item.group.visible) continue;
-
-    const distance = distanceXZ(player.position, item.group.position);
-
-    if (distance < 4 && distance < nearestDistance) {
-      nearest = item;
-      nearestDistance = distance;
-    }
-  }
-
-  selectedInteractable = nearest;
-
-  if (nearest) {
-    ui.interactionPrompt?.classList.remove("hidden");
-
-    if (ui.interactionText) {
-      ui.interactionText.textContent = nearest.label;
-    }
-  } else {
-    ui.interactionPrompt?.classList.add("hidden");
-  }
-}
-
-function updateCrystals(delta) {
-  for (const crystal of crystals) {
-    if (crystal.collected) continue;
-
-    crystal.group.rotation.y += delta * 0.5;
-    crystal.group.position.y =
-      crystal.baseY + Math.sin(state.playTime * 1.7) * 0.18;
-
-    crystal.crystal.rotation.y += delta * 0.4;
-    crystal.ring.rotation.z += delta * 0.65;
-  }
-}
-
-/* =========================================================
-   INVENTÁRIO E HABILIDADES
-========================================================= */
-
-function addItem(item) {
-  const existing = inventory.find((entry) => entry.id === item.id);
-
-  if (existing && item.stackable) {
-    existing.quantity += item.quantity ?? 1;
-  } else {
-    inventory.push({
-      ...item,
-      quantity: item.quantity ?? 1,
-    });
-  }
-
-  renderInventory();
-}
-
-function renderInventory() {
-  if (!ui.inventoryItems) return;
-
-  ui.inventoryItems.replaceChildren();
-
-  if (ui.inventoryCount) {
-    ui.inventoryCount.textContent = `Itens: ${inventory.length}`;
-  }
-
-  if (ui.goldText) {
-    ui.goldText.textContent = `Ouro: ${playerData.gold}`;
-  }
-
-  if (inventory.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty-state";
-    empty.textContent = "Seu inventário está vazio.";
-    ui.inventoryItems.appendChild(empty);
-  }
-
-  inventory.forEach((item) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "inventory-slot";
-    button.classList.toggle("selected", state.selectedItem === item.id);
-
-    const icon = document.createElement("span");
-    icon.className = "item-icon";
-    icon.textContent = item.icon ?? "◇";
-
-    const name = document.createElement("span");
-    name.className = "item-name";
-    name.textContent = item.name;
-
-    const quantity = document.createElement("span");
-    quantity.className = "item-quantity";
-    quantity.textContent = `x${item.quantity}`;
-
-    button.append(icon, name, quantity);
-
-    button.addEventListener("click", () => {
-      state.selectedItem = item.id;
-      renderInventory();
-      renderItemDetails(item);
-    });
-
-    ui.inventoryItems.appendChild(button);
-  });
-
-  const selected = inventory.find((item) => item.id === state.selectedItem);
-
-  if (selected) {
-    renderItemDetails(selected);
-  } else {
-    if (ui.itemDetails) {
-      ui.itemDetails.textContent = "Selecione um item para ver seus detalhes.";
-    }
-
-    if (ui.useItemButton) ui.useItemButton.disabled = true;
-    if (ui.equipItemButton) ui.equipItemButton.disabled = true;
-  }
-}
-
-function renderItemDetails(item) {
-  if (!ui.itemDetails) return;
-
-  ui.itemDetails.textContent =
-    `${item.name} — ${item.description ?? "Sem descrição."} ` +
-    `Categoria: ${item.category ?? "Material"}.`;
-
-  if (ui.useItemButton) {
-    ui.useItemButton.disabled = item.type !== "potion";
-  }
-
-  if (ui.equipItemButton) {
-    ui.equipItemButton.disabled = item.type !== "weapon";
-  }
-}
-
-function useSelectedItem() {
-  const item = inventory.find((entry) => entry.id === state.selectedItem);
-
-  if (!item || item.type !== "potion") return;
-
-  if (playerData.hp >= playerData.maxHp) {
-    showToast("Sua vitalidade já está completa.");
-    return;
-  }
-
-  playerData.hp = Math.min(playerData.maxHp, playerData.hp + 40);
-  item.quantity--;
-
-  if (item.quantity <= 0) {
-    inventory.splice(inventory.indexOf(item), 1);
-    state.selectedItem = null;
-  }
-
-  showToast("Poção utilizada: +40 de vitalidade.");
-  updateHUD();
-  renderInventory();
-}
-
-function equipSelectedItem() {
-  const item = inventory.find((entry) => entry.id === state.selectedItem);
-
-  if (!item || item.type !== "weapon") return;
-
-  playerData.attack += item.attackBonus ?? 5;
-
-  item.type = "equipped";
-  item.description = "Arma equipada.";
-  item.attackBonus = 0;
-
-  showToast(`${item.name} equipada!`);
-  renderInventory();
-  updateHUD();
-}
-
-function renderSkills() {
-  if (!ui.skillsList) return;
-
-  ui.skillsList.replaceChildren();
-
-  if (ui.skillPointsText) {
-    ui.skillPointsText.textContent =
-      `Pontos disponíveis: ${playerData.skillPoints}`;
-  }
-
-  const skills = [
-    {
-      id: "strength",
-      name: "Força ancestral",
-      description: "+5 de ataque permanente.",
-      apply: () => { playerData.attack += 5; },
-    },
-    {
-      id: "vitality",
-      name: "Vitalidade",
-      description: "+25 de vida máxima e recuperação total.",
-      apply: () => {
-        playerData.maxHp += 25;
-        playerData.hp = playerData.maxHp;
-      },
-    },
-    {
-      id: "energy",
-      name: "Energia mística",
-      description: "+15 de energia máxima.",
-      apply: () => {
-        playerData.maxMana += 15;
-        playerData.mana = playerData.maxMana;
-      },
-    },
-    {
-      id: "defense",
-      name: "Pele de pedra",
-      description: "+2 de defesa permanente.",
-      apply: () => { playerData.defense += 2; },
-    },
-  ];
-
-  for (const skill of skills) {
-    const card = document.createElement("div");
-    card.className = "skill-card";
-
-    const title = document.createElement("strong");
-    title.textContent = skill.name;
-
-    const description = document.createElement("span");
-    description.textContent = skill.description;
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "DESBLOQUEAR";
-    button.disabled = playerData.skillPoints <= 0;
-
-    button.addEventListener("click", () => {
-      if (playerData.skillPoints <= 0) return;
-
-      playerData.skillPoints--;
-      skill.apply();
-
-      showToast(`Habilidade desbloqueada: ${skill.name}`);
-      renderSkills();
-      updateHUD();
-    });
-
-    card.append(title, description, button);
-    ui.skillsList.appendChild(card);
-  }
-}
-
-/* =========================================================
-   MAPA E CONFIGURAÇÕES
-========================================================= */
-
-function renderMap() {
-  if (!ui.worldMap) return;
-
-  ui.worldMap.replaceChildren();
-
-  const locations = [
-    { name: "Ilha Esquecida", x: 50, y: 50, color: "#75e8ff" },
-    { name: "Floresta dos Sussurros", x: 25, y: 35, color: "#4f9d73" },
-    { name: "Ruínas de Aether", x: 68, y: 28, color: "#e9c77b" },
-    { name: "Vale das Cinzas", x: 72, y: 70, color: "#bb8c92" },
-    { name: "Lago Cristalino", x: 30, y: 75, color: "#6eb8e8" },
-  ];
-
-  const map = document.createElement("div");
-  map.style.position = "relative";
-  map.style.width = "100%";
-  map.style.height = "240px";
-
-  for (const location of locations) {
-    const marker = document.createElement("div");
-
-    marker.style.position = "absolute";
-    marker.style.left = `${location.x}%`;
-    marker.style.top = `${location.y}%`;
-    marker.style.width = "10px";
-    marker.style.height = "10px";
-    marker.style.borderRadius = "50%";
-    marker.style.background = location.color;
-    marker.style.boxShadow = `0 0 12px ${location.color}`;
-    marker.title = location.name;
-
-    map.appendChild(marker);
-  }
-
-  const playerMarker = document.createElement("div");
-  playerMarker.style.position = "absolute";
-  playerMarker.style.left =
-    `${clamp(50 + player.position.x / CONFIG.worldSize * 90, 5, 95)}%`;
-  playerMarker.style.top =
-    `${clamp(50 + player.position.z / CONFIG.worldSize * 90, 5, 95)}%`;
-  playerMarker.style.width = "12px";
-  playerMarker.style.height = "12px";
-  playerMarker.style.borderRadius = "50%";
-  playerMarker.style.background = "#ffffff";
-  playerMarker.style.border = "2px solid #75e8ff";
-  playerMarker.title = "Você";
-
-  map.appendChild(playerMarker);
-  ui.worldMap.appendChild(map);
-
-  if (ui.mapLocation) {
-    ui.mapLocation.textContent =
-      `Localização: ${state.location} · Cristais: ${state.crystals}/5`;
-  }
-}
-
-function applySettings() {
-  if (ui.graphicsSelect) {
-    settings.graphics = ui.graphicsSelect.value;
-  }
-
-  if (ui.volumeInput) {
-    settings.volume = Number(ui.volumeInput.value);
-  }
-
-  if (ui.shadowsToggle) {
-    settings.shadows = ui.shadowsToggle.checked;
-  }
-
-  if (ui.sensitivityInput) {
-    cameraState.sensitivity = Number(ui.sensitivityInput.value);
-  }
-
-  if (renderer) {
-    const pixelRatio = settings.graphics === "low"
-      ? 1
-      : settings.graphics === "high"
-        ? Math.min(window.devicePixelRatio || 1, 2)
-        : Math.min(window.devicePixelRatio || 1, 1.5);
-
-    renderer.setPixelRatio(pixelRatio);
-    renderer.shadowMap.enabled = settings.shadows;
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
-
-  if (sunLight) {
-    sunLight.castShadow = settings.shadows &&
-      settings.graphics !== "low";
-  }
-
-  saveGame();
-  showToast("Configurações aplicadas.");
-}
-
-/* =========================================================
-   SALVAMENTO
-========================================================= */
-
-function saveGame() {
-  if (!player || !scene) return false;
-
-  const save = {
-    version: 1,
-    player: {
-      x: player.position.x,
-      y: player.position.y,
-      z: player.position.z,
-      rotation: player.rotation.y,
-      ...playerData,
-    },
-    crystals: crystals.map((crystal) => crystal.collected),
-    bossDefeated: state.bossDefeated,
-    bossSpawned: state.bossSpawned,
-    playTime: state.playTime,
-    gold: playerData.gold,
-    inventory: inventory.map((item) => ({ ...item })),
-    settings: { ...settings },
-    camera: {
-      yaw: cameraState.yaw,
-      pitch: cameraState.pitch,
-    },
-  };
-
-  try {
-    localStorage.setItem(CONFIG.saveKey, JSON.stringify(save));
-    saveRequested = false;
-    showToast("Jogo salvo neste dispositivo.");
-    return true;
-  } catch (error) {
-    console.error("Não foi possível salvar:", error);
-    showToast("Falha ao salvar. Verifique o armazenamento do navegador.");
-    return false;
-  }
-}
-
-function readSave() {
-  try {
-    const raw = localStorage.getItem(CONFIG.saveKey);
-    if (!raw) return null;
-
-    const save = JSON.parse(raw);
-
-    if (
-      !save ||
-      save.version !== 1 ||
-      !save.player ||
-      !Number.isFinite(save.player.x) ||
-      !Number.isFinite(save.player.z) ||
-      !Array.isArray(save.crystals)
-    ) {
-      return null;
-    }
-
-    return save;
-  } catch (error) {
-    console.warn("Save inválido:", error);
-    return null;
-  }
-}
-
-function loadGame() {
-  const save = readSave();
-
-  if (!save) {
-    showToast("Nenhum salvamento válido encontrado.");
-    return false;
-  }
-
-  const p = save.player;
-
-  player.position.set(
-    clamp(p.x, -85, 85),
-    0,
-    clamp(p.z, -85, 85)
-  );
-
-  player.rotation.y = Number.isFinite(p.rotation) ? p.rotation : 0;
-
-  const numericFields = [
-    "hp", "maxHp", "mana", "maxMana", "level", "xp",
-    "xpNext", "attack", "defense", "speed", "skillPoints", "gold",
-  ];
-
-  for (const field of numericFields) {
-    if (Number.isFinite(p[field])) {
-      playerData[field] = p[field];
-    }
-  }
-
-  playerData.hp = clamp(playerData.hp, 1, playerData.maxHp);
-  playerData.mana = clamp(playerData.mana, 0, playerData.maxMana);
-  playerData.dead = false;
-
-  state.crystals = 0;
-
-  crystals.forEach((crystal, index) => {
-    crystal.collected = Boolean(save.crystals[index]);
-    crystal.group.visible = !crystal.collected;
-
-    if (crystal.collected) state.crystals++;
-  });
-
-  state.bossDefeated = Boolean(save.bossDefeated);
-  state.bossSpawned = false;
-  state.playTime = Number.isFinite(save.playTime) ? save.playTime : 0;
-
-  inventory.splice(0, inventory.length);
-
-  if (Array.isArray(save.inventory)) {
-    for (const item of save.inventory) {
-      if (
-        item &&
-        typeof item.id === "string" &&
-        typeof item.name === "string" &&
-        Number.isFinite(item.quantity) &&
-        item.quantity > 0
-      ) {
-        inventory.push({ ...item });
-      }
-    }
-  }
-
-  if (save.settings && typeof save.settings === "object") {
-    Object.assign(settings, save.settings);
-
-    if (ui.graphicsSelect) {
-      ui.graphicsSelect.value = settings.graphics;
-    }
-
-    if (ui.volumeInput) {
-      ui.volumeInput.value = String(settings.volume);
-    }
-
-    if (ui.shadowsToggle) {
-      ui.shadowsToggle.checked = settings.shadows;
-    }
-  }
-
-  if (save.camera) {
-    cameraState.yaw = Number.isFinite(save.camera.yaw)
-      ? save.camera.yaw
-      : 0;
-
-    cameraState.pitch = Number.isFinite(save.camera.pitch)
-      ? save.camera.pitch
-      : 0.27;
-  }
-
-  if (state.crystals >= 5 && !state.bossDefeated) {
-    createBoss();
-  }
-
-  if (state.bossDefeated && boss) {
-    boss.dead = true;
-    boss.mesh.visible = false;
-  }
-
-  applySettings();
-  updateQuest();
-  updateHUD();
-  renderInventory();
-
-  showToast("Progresso carregado.");
-  return true;
-}
-
-function startNewGame() {
-  const existing = readSave();
-
-  if (existing) {
-    const confirmed = window.confirm(
-      "Iniciar uma nova jornada? O salvamento atual será substituído."
-    );
-
-    if (!confirmed) return;
-  }
-
-  locationReloadWorld();
-}
-
-function locationReloadWorld() {
-  // Reiniciar a sessão sem duplicar a cena ou os listeners.
-  player.position.set(0, 0, 0);
-  player.rotation.set(0, 0, 0);
-
-  Object.assign(playerData, {
-    hp: 100,
-    maxHp: 100,
-    mana: 50,
-    maxMana: 50,
-    level: 1,
-    xp: 0,
-    xpNext: 100,
-    attack: 20,
-    defense: 3,
-    speed: CONFIG.playerSpeed,
-    skillPoints: 0,
-    gold: 0,
-    invulnerable: 0,
-    attackCooldown: 0,
-    dodgeCooldown: 0,
-    dodgeTime: 0,
-    dead: false,
-  });
-
-  inventory.length = 0;
-  state.selectedItem = null;
-  state.crystals = 0;
-  state.bossDefeated = false;
-  state.bossSpawned = false;
-  state.playTime = 0;
-  state.ended = false;
-  state.victory = false;
-
-  crystals.forEach((crystal) => {
-    crystal.collected = false;
-    crystal.group.visible = true;
-  });
-
-  for (const enemy of enemies) {
-    enemy.dead = false;
-    enemy.hp = enemy.maxHp;
-    enemy.state = "idle";
-    enemy.cooldown = random(0.5, 1.5);
-    enemy.mesh.visible = true;
-    enemy.mesh.position.copy(enemy.home);
-  }
-
-  if (boss) {
-    scene.remove(boss.mesh);
-    boss.mesh.traverse((object) => {
-      if (object.geometry) object.geometry.dispose();
-      if (object.material) {
-        if (Array.isArray(object.material)) {
-          object.material.forEach((material) => material.dispose());
-        } else {
-          object.material.dispose();
-        }
-      }
-    });
-    boss = null;
-  }
-
-  localStorage.removeItem(CONFIG.saveKey);
-
-  cameraState.yaw = 0;
-  cameraState.pitch = 0.27;
-
-  setScreen(ui.endScreen, false);
-  setScreen(ui.pauseScreen, false);
-  setScreen(ui.startScreen, false);
-
-  state.started = true;
-  state.running = true;
-  state.paused = false;
-
-  updateQuest();
-  updateHUD();
-  renderInventory();
-  showMessage("A névoa esconde segredos antigos...");
-
-  if (isTouchDevice()) {
-    ui.mobileControls?.classList.remove("hidden");
-  }
-
-  renderer.domElement.focus();
-}
-
-/* =========================================================
-   PAUSA, MENUS E CONTROLES
-========================================================= */
-
-function isTouchDevice() {
-  return window.matchMedia("(pointer: coarse)").matches ||
-    navigator.maxTouchPoints > 0;
-}
-
-function pauseGame() {
-  if (!state.started || state.ended || state.paused) return;
-
-  state.paused = true;
-  state.running = false;
-
-  setScreen(ui.pauseScreen, true);
-
-  if (document.pointerLockElement) {
-    document.exitPointerLock();
-  }
-}
-
-function resumeGame() {
-  if (state.ended || playerData.dead) return;
-
-  state.paused = false;
-  state.running = true;
-
-  setScreen(ui.pauseScreen, false);
-  setScreen(ui.settingsScreen, false);
-
-  clock.getDelta();
-
-  if (!isTouchDevice()) {
-    renderer.domElement.requestPointerLock?.();
-  }
-}
-
-function toggleInventory() {
-  if (!state.started || state.ended) return;
-
-  if (state.inventoryOpen) {
-    state.inventoryOpen = false;
-    setScreen(ui.inventoryScreen, false);
-    return;
-  }
-
-  closeOtherMenus();
-
-  state.inventoryOpen = true;
-  setScreen(ui.inventoryScreen, true);
-  renderInventory();
-}
-
-function toggleMap() {
-  if (!state.started || state.ended) return;
-
-  if (state.mapOpen) {
-    state.mapOpen = false;
-    setScreen(ui.mapScreen, false);
-    return;
-  }
-
-  closeOtherMenus();
-
-  state.mapOpen = true;
-  setScreen(ui.mapScreen, true);
-  renderMap();
-}
-
-function toggleSkills() {
-  if (!state.started || state.ended) return;
-
-  if (state.skillsOpen) {
-    state.skillsOpen = false;
-    setScreen(ui.skillsScreen, false);
-    return;
-  }
-
-  closeOtherMenus();
-
-  state.skillsOpen = true;
-  setScreen(ui.skillsScreen, true);
-  renderSkills();
-}
-
-function closeOtherMenus() {
-  state.inventoryOpen = false;
-  state.mapOpen = false;
-  state.skillsOpen = false;
-  state.settingsOpen = false;
-  state.dialogueOpen = false;
-
-  setScreen(ui.inventoryScreen, false);
-  setScreen(ui.mapScreen, false);
-  setScreen(ui.skillsScreen, false);
-  setScreen(ui.settingsScreen, false);
-  setScreen(ui.dialogueScreen, false);
-}
-
-function openSettings() {
-  state.settingsOpen = true;
-  setScreen(ui.settingsScreen, true);
-}
-
-function closeSettings() {
-  state.settingsOpen = false;
-  setScreen(ui.settingsScreen, false);
-}
-
-function closeMenuWithEscape() {
-  if (state.dialogueOpen) {
-    state.dialogueOpen = false;
-    setScreen(ui.dialogueScreen, false);
-    return;
-  }
-
-  if (state.inventoryOpen) {
-    toggleInventory();
-    return;
-  }
-
-  if (state.mapOpen) {
-    toggleMap();
-    return;
-  }
-
-  if (state.skillsOpen) {
-    toggleSkills();
-    return;
-  }
-
-  if (state.settingsOpen) {
-    closeSettings();
-
-    if (state.paused) {
-      setScreen(ui.pauseScreen, true);
-    }
-
-    return;
-  }
-
-  if (state.paused) {
-    resumeGame();
-  } else {
-    pauseGame();
-  }
-}
-
-function setupControls() {
+function setupEvents() {
   window.addEventListener("keydown", (event) => {
     if ([
-      "Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+      "Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"
     ].includes(event.code)) {
       event.preventDefault();
     }
 
-    if (event.repeat && [
-      "KeyE", "Tab", "KeyM", "Escape", "Space", "KeyQ",
-    ].includes(event.code)) {
+    if (event.repeat) return;
+
+    state.keys.add(event.code);
+
+    if (!state.started || state.paused || state.dead) {
+      if (event.code === "Escape" && state.started && !state.dead) {
+        togglePause();
+      }
       return;
     }
 
-    keys.add(event.code);
-
-    if (event.code === "Escape") {
-      closeMenuWithEscape();
-      return;
-    }
-
-    if (event.code === "Tab") {
-      event.preventDefault();
-      toggleInventory();
-      return;
-    }
-
-    if (event.code === "KeyM") {
-      toggleMap();
-      return;
-    }
-
-    if (event.code === "KeyK") {
-      toggleSkills();
-      return;
-    }
-
-    if (event.code === "KeyE") {
-      interact();
-      return;
-    }
-
-    if (event.code === "Space") {
-      dodge();
-      return;
-    }
-
-    if (event.code === "KeyQ") {
-      useSpecialSkill();
-      return;
+    switch (event.code) {
+      case "Escape":
+        togglePause();
+        break;
+      case "KeyI":
+        toggleScreen(ui.inventory);
+        renderInventory();
+        break;
+      case "KeyM":
+        toggleScreen(ui.map);
+        break;
+      case "KeyK":
+        toggleScreen(ui.skills);
+        renderSkills();
+        break;
+      case "KeyE":
+        interact();
+        break;
+      case "KeyQ":
+        useSelectedItem();
+        break;
+      case "Space":
+        jump();
+        break;
+      case "ShiftLeft":
+      case "ShiftRight":
+        break;
+      case "KeyJ":
+        showToast("Missão atual: " + ($("questTitle")?.textContent || "Exploração"));
+        break;
     }
   });
 
   window.addEventListener("keyup", (event) => {
-    keys.delete(event.code);
-  });
-
-  window.addEventListener("blur", () => {
-    keys.clear();
-    touchMoves.clear();
-
-    if (state.running) pauseGame();
+    state.keys.delete(event.code);
   });
 
   renderer.domElement.addEventListener("click", () => {
-    if (!state.running || state.paused || isTouchDevice()) return;
-
-    if (document.pointerLockElement !== renderer.domElement) {
-      renderer.domElement.requestPointerLock?.();
-    } else {
-      attack();
+    if (state.started && !state.paused && !isAnyModalOpen()) {
+      try {
+        renderer.domElement.requestPointerLock?.();
+      } catch {
+        // Alguns navegadores podem bloquear o pointer lock.
+      }
     }
+  });
+
+  document.addEventListener("pointerlockchange", () => {
+    state.mouseDown = document.pointerLockElement === renderer.domElement;
+  });
+
+  document.addEventListener("mousemove", (event) => {
+    if (
+      document.pointerLockElement !== renderer.domElement ||
+      !state.started ||
+      state.paused
+    ) return;
+
+    state.yaw -= event.movementX * 0.002 * state.settings.sensitivity;
+    state.pitch -= event.movementY * 0.0015 * state.settings.sensitivity;
+    state.pitch = THREE.MathUtils.clamp(state.pitch, -0.15, 0.65);
   });
 
   renderer.domElement.addEventListener("contextmenu", (event) => {
     event.preventDefault();
   });
 
-  document.addEventListener("pointerlockchange", () => {
-    state.pointerLocked =
-      document.pointerLockElement === renderer.domElement;
+  renderer.domElement.addEventListener("mousedown", (event) => {
+    if (!state.started || state.paused || isAnyModalOpen()) return;
+
+    if (event.button === 0 && document.pointerLockElement === renderer.domElement) {
+      attack();
+    }
+
+    if (event.button === 2 && document.pointerLockElement === renderer.domElement) {
+      heavyAttack();
+    }
   });
 
-  document.addEventListener("mousemove", (event) => {
-    if (!state.running || state.paused || !state.pointerLocked) return;
-
-    cameraState.yaw -= event.movementX * 0.002 * cameraState.sensitivity;
-    cameraState.pitch = clamp(
-      cameraState.pitch + event.movementY * 0.0018 * cameraState.sensitivity,
-      -0.1,
-      0.85
-    );
+  window.addEventListener("blur", () => {
+    state.keys.clear();
+    state.mobileMoves.clear();
   });
 
-  // Câmera por arraste em dispositivos sem mouse.
-  renderer.domElement.addEventListener("pointerdown", (event) => {
-    if (!isTouchDevice() || !state.running || state.paused) return;
-
-    cameraState.dragging = true;
-    cameraState.lastX = event.clientX;
-    cameraState.lastY = event.clientY;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && state.started && !state.paused) {
+      togglePause();
+    }
   });
 
-  window.addEventListener("pointermove", (event) => {
-    if (!cameraState.dragging || !isTouchDevice()) return;
-
-    const dx = event.clientX - cameraState.lastX;
-    const dy = event.clientY - cameraState.lastY;
-
-    cameraState.yaw -= dx * 0.006 * cameraState.sensitivity;
-    cameraState.pitch = clamp(
-      cameraState.pitch + dy * 0.004 * cameraState.sensitivity,
-      -0.1,
-      0.85
-    );
-
-    cameraState.lastX = event.clientX;
-    cameraState.lastY = event.clientY;
-  });
-
-  window.addEventListener("pointerup", () => {
-    cameraState.dragging = false;
-  });
-
-  window.addEventListener("pointercancel", () => {
-    cameraState.dragging = false;
-    touchMoves.clear();
-  });
-
-  // Movimento por toque.
+  // Controles de movimento para celular.
   document.querySelectorAll("[data-move]").forEach((button) => {
-    const move = button.dataset.move;
+    const direction = button.dataset.move;
 
-    button.addEventListener("pointerdown", (event) => {
+    const start = (event) => {
       event.preventDefault();
-      touchMoves.add(move);
+      state.mobileMoves.add(direction);
       button.setPointerCapture?.(event.pointerId);
-    });
+    };
 
-    const release = () => touchMoves.delete(move);
+    const stop = (event) => {
+      event.preventDefault();
+      state.mobileMoves.delete(direction);
+    };
 
-    button.addEventListener("pointerup", release);
-    button.addEventListener("pointercancel", release);
-    button.addEventListener("lostpointercapture", release);
+    button.addEventListener("pointerdown", start);
+    button.addEventListener("pointerup", stop);
+    button.addEventListener("pointercancel", stop);
+    button.addEventListener("lostpointercapture", stop);
   });
 
   document.querySelectorAll("[data-action]").forEach((button) => {
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-
-      switch (button.dataset.action) {
-        case "attack":
-          attack();
-          break;
-        case "dodge":
-          dodge();
-          break;
-        case "interact":
-          interact();
-          break;
-        case "skill":
-          useSpecialSkill();
-          break;
-      }
+    button.addEventListener("click", () => {
+      if (!state.started || state.paused) return;
+      runAction(button.dataset.action);
     });
   });
 
-  // Interface.
-  $("startButton")?.addEventListener("click", startNewGame);
+  // O celular não tem mouse; o arrasto na tela gira a câmera.
+  let touchLook = null;
 
-  ui.continueButton?.addEventListener("click", () => {
-    if (loadGame()) {
-      state.started = true;
-      state.running = true;
-      state.paused = false;
+  renderer.domElement.addEventListener("pointerdown", (event) => {
+    if (
+      event.pointerType !== "touch" ||
+      !state.started ||
+      state.paused
+    ) return;
 
-      setScreen(ui.startScreen, false);
-
-      if (isTouchDevice()) {
-        ui.mobileControls?.classList.remove("hidden");
-      }
+    if (event.clientX > window.innerWidth * 0.35) {
+      touchLook = {
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY
+      };
     }
   });
 
-  $("resumeButton")?.addEventListener("click", resumeGame);
-  $("restartButton")?.addEventListener("click", startNewGame);
+  renderer.domElement.addEventListener("pointermove", (event) => {
+    if (!touchLook || touchLook.id !== event.pointerId) return;
 
-  $("pauseSaveButton")?.addEventListener("click", saveGame);
-  $("pauseSettingsButton")?.addEventListener("click", () => {
-    setScreen(ui.pauseScreen, false);
-    openSettings();
+    const dx = event.clientX - touchLook.x;
+    const dy = event.clientY - touchLook.y;
+
+    state.yaw -= dx * 0.006 * state.settings.sensitivity;
+    state.pitch -= dy * 0.003 * state.settings.sensitivity;
+    state.pitch = THREE.MathUtils.clamp(state.pitch, -0.15, 0.65);
+
+    touchLook.x = event.clientX;
+    touchLook.y = event.clientY;
   });
 
-  $("openSettingsButton")?.addEventListener("click", () => {
-    setScreen(ui.startScreen, false);
-    openSettings();
+  const stopTouchLook = () => {
+    touchLook = null;
+  };
+
+  renderer.domElement.addEventListener("pointerup", stopTouchLook);
+  renderer.domElement.addEventListener("pointercancel", stopTouchLook);
+}
+
+/* ---------- Interface ---------- */
+
+function setupUI() {
+  $("startButton")?.addEventListener("click", startGame);
+  $("continueButton")?.addEventListener("click", continueGame);
+  $("resumeButton")?.addEventListener("click", resumeGame);
+
+  $("pauseSaveButton")?.addEventListener("click", () => {
+    saveGame();
+    showToast("Progresso salvo.");
+  });
+
+  $("pauseSettingsButton")?.addEventListener("click", () => {
+    ui.pause.classList.add("hidden");
+    ui.settings.classList.remove("hidden");
+  });
+
+  $("mainMenuButton")?.addEventListener("click", () => {
+    ui.pause.classList.add("hidden");
+    ui.start.classList.remove("hidden");
+    state.started = false;
+    state.paused = false;
+    document.exitPointerLock?.();
+  });
+
+  $("restartButton")?.addEventListener("click", () => {
+    localStorage.removeItem("veyra-save");
+    location.reload();
+  });
+
+  $("closeInventoryButton")?.addEventListener("click", () => {
+    ui.inventory.classList.add("hidden");
+  });
+
+  $("closeMapButton")?.addEventListener("click", () => {
+    ui.map.classList.add("hidden");
+  });
+
+  $("closeSkillsButton")?.addEventListener("click", () => {
+    ui.skills.classList.add("hidden");
   });
 
   $("closeSettingsButton")?.addEventListener("click", () => {
-    closeSettings();
-
-    if (!state.started) {
-      setScreen(ui.startScreen, true);
-    } else if (state.paused) {
-      setScreen(ui.pauseScreen, true);
-    }
+    ui.settings.classList.add("hidden");
+    if (state.started && !state.paused) resumeGame();
   });
+
+  $("closeDialogueButton")?.addEventListener("click", closeDialogue);
+
+  $("useItemButton")?.addEventListener("click", useSelectedItem);
+  $("equipItemButton")?.addEventListener("click", equipSelectedItem);
 
   $("saveSettingsButton")?.addEventListener("click", () => {
     applySettings();
-    closeSettings();
+    localStorage.setItem(
+      "veyra-settings",
+      JSON.stringify(state.settings)
+    );
 
-    if (!state.started) {
-      setScreen(ui.startScreen, true);
-    } else if (state.paused) {
-      setScreen(ui.pauseScreen, true);
-    }
+    ui.settings.classList.add("hidden");
+    showToast("Configurações salvas.");
+
+    if (state.started && !state.paused) resumeGame();
   });
 
-  $("closeInventoryButton")?.addEventListener("click", toggleInventory);
-  $("closeMapButton")?.addEventListener("click", toggleMap);
-  $("closeSkillsButton")?.addEventListener("click", toggleSkills);
-
-  ui.useItemButton?.addEventListener("click", useSelectedItem);
-  ui.equipItemButton?.addEventListener("click", equipSelectedItem);
-
-  $("mainMenuButton")?.addEventListener("click", () => {
-    saveGame();
-
-    state.running = false;
-    state.paused = false;
-    state.started = false;
-
-    closeOtherMenus();
-    setScreen(ui.pauseScreen, false);
-    setScreen(ui.startScreen, true);
-
-    ui.continueButton.disabled = !readSave();
+  // Existem dois botões com o mesmo ID no HTML:
+  // ambos abrem as configurações.
+  document.querySelectorAll("#openSettingsButton").forEach((button) => {
+    button.addEventListener("click", () => {
+      ui.start.classList.add("hidden");
+      ui.settings.classList.remove("hidden");
+      populateSettings();
+    });
   });
 
-  // Ajusta o botão Continuar conforme o salvamento disponível.
-  if (ui.continueButton) {
-    ui.continueButton.disabled = !readSave();
+  $("openInventoryButton")?.addEventListener("click", () => {
+    ui.inventory.classList.remove("hidden");
+    renderInventory();
+  });
+
+  $("openMapButton")?.addEventListener("click", () => {
+    ui.map.classList.remove("hidden");
+  });
+
+  $("graphicsSelect")?.addEventListener("change", (event) => {
+    state.settings.graphics = event.target.value;
+  });
+
+  $("sensitivityInput")?.addEventListener("input", (event) => {
+    state.settings.sensitivity = Number(event.target.value);
+  });
+
+  $("volumeInput")?.addEventListener("input", (event) => {
+    state.settings.volume = Number(event.target.value);
+  });
+
+  $("shadowsToggle")?.addEventListener("change", (event) => {
+    state.settings.shadows = event.target.checked;
+  });
+
+  updateMobileControls();
+}
+
+function startGame() {
+  ui.start.classList.add("hidden");
+  ui.pause.classList.add("hidden");
+  ui.settings.classList.add("hidden");
+
+  state.started = true;
+  state.paused = false;
+  state.dead = false;
+
+  if (isMobile()) {
+    ui.mobile.classList.remove("hidden");
+  }
+
+  showToast("Bem-vindo às Terras Esquecidas.");
+  document.exitPointerLock?.();
+}
+
+function continueGame() {
+  const saved = readSave();
+
+  if (!saved) {
+    startGame();
+    return;
+  }
+
+  restoreSave(saved);
+  ui.start.classList.add("hidden");
+  state.started = true;
+  state.paused = false;
+  state.dead = false;
+
+  updateHUD();
+  renderInventory();
+  updateQuest();
+  updateMobileControls();
+
+  showToast("Sua jornada foi restaurada.");
+}
+
+function resumeGame() {
+  ui.pause.classList.add("hidden");
+  ui.settings.classList.add("hidden");
+  ui.inventory.classList.add("hidden");
+  ui.map.classList.add("hidden");
+  ui.skills.classList.add("hidden");
+
+  state.paused = false;
+  state.started = true;
+
+  updateMobileControls();
+}
+
+function togglePause() {
+  if (!state.started || state.dead || !ui.start.classList.contains("hidden")) {
+    return;
+  }
+
+  state.paused = !state.paused;
+  ui.pause.classList.toggle("hidden", !state.paused);
+
+  if (state.paused) {
+    document.exitPointerLock?.();
+    state.keys.clear();
+    state.mobileMoves.clear();
   }
 }
 
-/* =========================================================
-   CICLO DE JOGO
-========================================================= */
+function toggleScreen(element) {
+  if (!element) return;
 
-function updateEnvironment(delta) {
-  if (sky) {
-    sky.rotation.y += delta * 0.002;
-  }
+  const wasHidden = element.classList.contains("hidden");
 
-  if (ambientLight && sunLight) {
-    const cycle = (Math.sin(state.playTime * 0.025) + 1) / 2;
+  closeAllScreens();
 
-    sunLight.intensity = 0.8 + cycle * 1.8;
-    ambientLight.intensity = 0.7 + cycle * 1.0;
-
-    const dayColor = new THREE.Color(0x8197a4);
-    const nightColor = new THREE.Color(0x111a35);
-    const skyColor = nightColor.clone().lerp(dayColor, cycle);
-
-    scene.background.copy(skyColor);
-    scene.fog.color.copy(skyColor);
-    sky.material.color.copy(skyColor);
-  }
-
-  const particles = scene.getObjectByName("ambientParticles");
-
-  if (particles) {
-    particles.rotation.y += delta * 0.015;
-    particles.position.y = Math.sin(state.playTime * 0.2) * 0.3;
+  if (wasHidden) {
+    element.classList.remove("hidden");
+    state.keys.clear();
+    state.mobileMoves.clear();
+    document.exitPointerLock?.();
   }
 }
 
-function updateLocation() {
-  const x = player.position.x;
-  const z = player.position.z;
+function closeAllScreens() {
+  [
+    ui.inventory,
+    ui.map,
+    ui.skills,
+    ui.settings,
+    ui.dialogue,
+    ui.ending
+  ].forEach((screen) => screen?.classList.add("hidden"));
+}
 
-  if (Math.abs(x - 30) < 17 && Math.abs(z + 25) < 17) {
-    state.location = "Ruínas de Aether";
-  } else if (z < -40) {
-    state.location = "Floresta dos Sussurros";
-  } else if (x > 35 && z > 5) {
-    state.location = "Vale das Cinzas";
-  } else if (x < -20 && z > 10) {
-    state.location = "Lago Cristalino";
+function isAnyModalOpen() {
+  return [
+    ui.inventory,
+    ui.map,
+    ui.skills,
+    ui.settings,
+    ui.dialogue,
+    ui.ending,
+    ui.pause,
+    ui.start
+  ].some((screen) => screen && !screen.classList.contains("hidden"));
+}
+
+function updateMobileControls() {
+  if (!ui.mobile) return;
+
+  ui.mobile.classList.toggle(
+    "hidden",
+    !isMobile() || !state.started || state.paused
+  );
+}
+
+function isMobile() {
+  return window.matchMedia("(pointer: coarse)").matches ||
+    window.innerWidth <= 700;
+}
+
+/* ---------- Movimento ---------- */
+
+const playerVelocity = new THREE.Vector3();
+let verticalVelocity = 0;
+let onGround = true;
+
+function updatePlayer(delta) {
+  if (!state.started || state.paused || state.dead) return;
+
+  const forward =
+    state.keys.has("KeyW") ||
+    state.keys.has("ArrowUp") ||
+    state.mobileMoves.has("forward");
+
+  const backward =
+    state.keys.has("KeyS") ||
+    state.keys.has("ArrowDown") ||
+    state.mobileMoves.has("backward");
+
+  const left =
+    state.keys.has("KeyA") ||
+    state.keys.has("ArrowLeft") ||
+    state.mobileMoves.has("left");
+
+  const right =
+    state.keys.has("KeyD") ||
+    state.keys.has("ArrowRight") ||
+    state.mobileMoves.has("right");
+
+  let x = Number(right) - Number(left);
+  let z = Number(backward) - Number(forward);
+
+  const moving = x !== 0 || z !== 0;
+
+  if (moving) {
+    const length = Math.hypot(x, z);
+    x /= length;
+    z /= length;
+
+    const sprint =
+      state.keys.has("ShiftLeft") ||
+      state.keys.has("ShiftRight");
+
+    const speed = state.playerSpeed * (sprint ? 1.55 : 1);
+
+    const angle = state.yaw;
+    const worldX = x * Math.cos(angle) + z * Math.sin(angle);
+    const worldZ = -x * Math.sin(angle) + z * Math.cos(angle);
+
+    player.position.x += worldX * speed * delta;
+    player.position.z += worldZ * speed * delta;
+
+    player.rotation.y = Math.atan2(worldX, worldZ) + Math.PI;
+
+    // Passos e capa.
+    const walkCycle = performance.now() * 0.009 * (sprint ? 1.7 : 1);
+    playerModel.leftLeg.rotation.x = Math.sin(walkCycle) * 0.55;
+    playerModel.rightLeg.rotation.x = Math.sin(walkCycle + Math.PI) * 0.55;
+    playerModel.leftArm.rotation.x = Math.sin(walkCycle + Math.PI) * 0.35;
+    playerModel.rightArm.rotation.x = Math.sin(walkCycle) * 0.35;
+    playerModel.cape.rotation.x = -0.08 + Math.sin(walkCycle * 0.5) * 0.06;
   } else {
-    state.location = "Ilha Esquecida";
+    playerModel.leftLeg.rotation.x = THREE.MathUtils.damp(
+      playerModel.leftLeg.rotation.x, 0, 9, delta
+    );
+
+    playerModel.rightLeg.rotation.x = THREE.MathUtils.damp(
+      playerModel.rightLeg.rotation.x, 0, 9, delta
+    );
+
+    playerModel.leftArm.rotation.x = THREE.MathUtils.damp(
+      playerModel.leftArm.rotation.x, 0, 9, delta
+    );
+
+    playerModel.rightArm.rotation.x = THREE.MathUtils.damp(
+      playerModel.rightArm.rotation.x, 0, 9, delta
+    );
+  }
+
+  // Limite inicial do mapa.
+  const limit = WORLD.size / 2 - 4;
+  player.position.x = THREE.MathUtils.clamp(
+    player.position.x, -limit, limit
+  );
+  player.position.z = THREE.MathUtils.clamp(
+    player.position.z, -limit, limit
+  );
+
+  if (state.invulnerability > 0) {
+    state.invulnerability -= delta;
+  }
+
+  if (state.attackCooldown > 0) {
+    state.attackCooldown -= delta;
+  }
+
+  if (state.dodgeCooldown > 0) {
+    state.dodgeCooldown -= delta;
+  }
+
+  // Gravidade e salto.
+  if (!onGround) {
+    verticalVelocity -= 15 * delta;
+    player.position.y += verticalVelocity * delta;
+
+    if (player.position.y <= 0) {
+      player.position.y = 0;
+      verticalVelocity = 0;
+      onGround = true;
+    }
+  }
+
+  updateCamera(delta);
+  updateInteractionPrompt();
+}
+
+function updateCamera(delta) {
+  const distance = isMobile() ? 6.8 : 6.2;
+  const height = 2.8 + state.pitch * 2.3;
+
+  const offset = new THREE.Vector3(
+    Math.sin(state.yaw) * distance,
+    height,
+    Math.cos(state.yaw) * distance
+  );
+
+  const target = player.position.clone().add(new THREE.Vector3(0, 1.7, 0));
+  const desired = target.clone().add(offset);
+
+  camera.position.lerp(desired, 1 - Math.exp(-6 * delta));
+  camera.lookAt(target);
+}
+
+/* ---------- Saltar, esquivar e atacar ---------- */
+
+function jump() {
+  if (!state.started || state.paused || !onGround) return;
+
+  verticalVelocity = 6.2;
+  onGround = false;
+}
+
+function dodge() {
+  if (state.dodgeCooldown > 0 || !state.started || state.paused) return;
+
+  const direction = new THREE.Vector3(
+    -Math.sin(state.yaw),
+    0,
+    -Math.cos(state.yaw)
+  );
+
+  player.position.addScaledVector(direction, 2.3);
+  state.invulnerability = 0.45;
+  state.dodgeCooldown = 1.2;
+
+  createBurst(player.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x62d8f1, 8);
+  playTone(180, 0.07, 0.03);
+}
+
+function attack() {
+  if (!state.started || state.paused || state.attackCooldown > 0) return;
+
+  state.attackCooldown = 0.42;
+
+  playerModel.rightArm.rotation.x = -1.1;
+  playerModel.rightArm.rotation.z = -0.6;
+
+  setTimeout(() => {
+    if (!playerModel) return;
+    playerModel.rightArm.rotation.x = 0;
+    playerModel.rightArm.rotation.z = 0;
+  }, 170);
+
+  const target = findCombatTarget(3.2);
+
+  if (target) {
+    damageTarget(target, 24 + state.skills.strength * 5);
+    createBurst(
+      target.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)),
+      0xffd38b,
+      10
+    );
+    playTone(125, 0.08, 0.06);
+  } else {
+    playTone(220, 0.04, 0.02);
   }
 }
 
-function update(delta) {
-  if (!state.running || state.paused || state.ended) return;
+function heavyAttack() {
+  if (!state.started || state.paused || state.mana < 15) return;
 
-  state.playTime += delta;
+  state.mana -= 15;
+  updateHUD();
 
-  updatePlayer(delta);
-  updateEnemies(delta);
-  updateCrystals(delta);
-  updateInteractions();
-  updateEnvironment(delta);
-  updateLocation();
+  const target = findCombatTarget(4.5);
 
-  // Salvamento automático periódico.
-  lastAutosave += delta;
+  createBurst(
+    player.position.clone().add(new THREE.Vector3(0, 1, 0)),
+    0x62cfea,
+    15
+  );
 
-  if (lastAutosave >= 60) {
-    lastAutosave = 0;
+  if (target) {
+    damageTarget(target, 45 + state.skills.arcana * 8);
+    createBurst(
+      target.root.position.clone().add(new THREE.Vector3(0, 1.3, 0)),
+      0x62cfea,
+      15
+    );
+  }
 
-    try {
-      const save = {
-        version: 1,
-        player: {
-          x: player.position.x,
-          y: player.position.y,
-          z: player.position.z,
-          rotation: player.rotation.y,
-          ...playerData,
-        },
-        crystals: crystals.map((crystal) => crystal.collected),
-        bossDefeated: state.bossDefeated,
-        bossSpawned: state.bossSpawned,
-        playTime: state.playTime,
-        gold: playerData.gold,
-        inventory: inventory.map((item) => ({ ...item })),
-        settings: { ...settings },
-        camera: {
-          yaw: cameraState.yaw,
-          pitch: cameraState.pitch,
-        },
+  playTone(90, 0.18, 0.05);
+}
+
+function runAction(action) {
+  switch (action) {
+    case "attack":
+      attack();
+      break;
+    case "heavyAttack":
+      heavyAttack();
+      break;
+    case "useItem":
+      useSelectedItem();
+      break;
+    case "dodge":
+      dodge();
+      break;
+    case "jump":
+      jump();
+      break;
+    case "interact":
+      interact();
+      break;
+  }
+}
+
+function findCombatTarget(range) {
+  let closest = null;
+  let closestDistance = range;
+
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+
+    const distance = player.position.distanceTo(enemy.root.position);
+
+    if (distance < closestDistance) {
+      const directionToEnemy = enemy.root.position.clone().sub(player.position);
+      directionToEnemy.y = 0;
+      directionToEnemy.normalize();
+
+      const facing = new THREE.Vector3(
+        -Math.sin(player.rotation.y),
+        0,
+        -Math.cos(player.rotation.y)
+      );
+
+      if (facing.dot(directionToEnemy) > -0.1) {
+        closest = enemy;
+        closestDistance = distance;
+      }
+    }
+  }
+
+  if (boss && boss.active && !boss.defeated) {
+    const distance = player.position.distanceTo(boss.root.position);
+
+    if (distance < closestDistance) {
+      closest = boss;
+    }
+  }
+
+  return closest;
+}
+
+function damageTarget(target, damage) {
+  if (target === boss) {
+    if (boss.defeated) return;
+
+    boss.health = Math.max(0, boss.health - damage);
+    updateBossHUD();
+
+    if (boss.health <= 0) {
+      defeatBoss();
+    }
+
+    return;
+  }
+
+  if (!target.alive) return;
+
+  target.health = Math.max(0, target.health - damage);
+  target.hitFlash = 0.16;
+
+  const ratio = target.health / target.maxHealth;
+  target.healthBar.fill.scale.x = Math.max(0.001, ratio);
+  target.healthBar.fill.position.x = -0.52 * (1 - ratio);
+
+  if (target.health <= 0) {
+    defeatEnemy(target);
+  }
+}
+
+function defeatEnemy(enemy) {
+  enemy.alive = false;
+  enemy.root.visible = false;
+  state.kills++;
+
+  state.xp += 25;
+  state.gold += 8 + Math.floor(Math.random() * 8);
+
+  addInventoryItem({
+    id: "essencia",
+    name: "Essência sombria",
+    description: "Uma pequena essência deixada por um inimigo.",
+    icon: "✦",
+    count: 1,
+    type: "material"
+  });
+
+  checkLevelUp();
+  updateHUD();
+  updateQuest();
+
+  showToast("Inimigo derrotado. Você recebeu experiência e ouro.");
+}
+
+function defeatBoss() {
+  boss.defeated = true;
+  boss.active = false;
+  boss.root.visible = false;
+
+  state.xp += 250;
+  state.gold += 150;
+  state.crystals += 1;
+
+  checkLevelUp();
+  updateHUD();
+
+  $("endEyebrow").textContent = "O GUARDIÃO FOI DERROTADO";
+  $("endTitle").textContent = "Um novo amanhecer";
+  $("endDescription").textContent =
+    "A energia das ruínas se acalma. Mas os ecos de Veyra ainda guardam segredos.";
+
+  ui.ending.classList.remove("hidden");
+  state.paused = true;
+  document.exitPointerLock?.();
+
+  saveGame();
+}
+
+function checkLevelUp() {
+  while (state.xp >= state.xpNext) {
+    state.xp -= state.xpNext;
+    state.level++;
+    state.skillPoints++;
+    state.xpNext = Math.floor(state.xpNext * 1.35);
+
+    state.maxHealth += 10;
+    state.maxMana += 5;
+    state.health = state.maxHealth;
+    state.mana = state.maxMana;
+
+    showToast(`Nível ${state.level}! Você recebeu um ponto de habilidade.`);
+  }
+}
+
+/* ---------- IA simples ---------- */
+
+function updateEnemies(delta) {
+  if (!state.started || state.paused || state.dead) return;
+
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+
+    const distance = enemy.root.position.distanceTo(player.position);
+
+    enemy.healthBar.holder.lookAt(camera.position);
+
+    if (distance < 12) {
+      enemy.aggro = true;
+    }
+
+    if (!enemy.aggro) {
+      enemy.model.leftArm.rotation.x =
+        Math.sin(performance.now() * 0.001 + enemy.phase) * 0.08;
+      continue;
+    }
+
+    if (distance > 1.8) {
+      const direction = player.position.clone().sub(enemy.root.position);
+      direction.y = 0;
+      direction.normalize();
+
+      enemy.root.position.addScaledVector(
+        direction,
+        enemy.speed * delta
+      );
+
+      enemy.root.rotation.y = Math.atan2(direction.x, direction.z) + Math.PI;
+
+      const step = performance.now() * 0.007 + enemy.phase;
+      enemy.model.leftLeg.rotation.x = Math.sin(step) * 0.4;
+      enemy.model.rightLeg.rotation.x = Math.sin(step + Math.PI) * 0.4;
+    } else {
+      enemy.attackTimer -= delta;
+
+      if (enemy.attackTimer <= 0) {
+        enemy.attackTimer = 1.7;
+        damagePlayer(9 + Math.floor(state.level * 0.5));
+      }
+    }
+
+    if (enemy.hitFlash > 0) {
+      enemy.hitFlash -= delta;
+    }
+  }
+
+  updateBossAI(delta);
+}
+
+function updateBossAI(delta) {
+  if (!boss || boss.defeated || !state.started || state.paused) return;
+
+  const distance = boss.root.position.distanceTo(player.position);
+
+  if (distance < 18) {
+    boss.active = true;
+    $("bossStatus")?.classList.remove("hidden");
+  }
+
+  if (!boss.active) return;
+
+  boss.root.rotation.y = Math.atan2(
+    player.position.x - boss.root.position.x,
+    player.position.z - boss.root.position.z
+  ) + Math.PI;
+
+  if (boss.health < boss.maxHealth * 0.5) {
+    boss.phase = 2;
+    $("bossPhase").textContent = "FASE II";
+    boss.aura.intensity = 10;
+  }
+
+  boss.attackTimer -= delta;
+
+  if (distance < 4.3 && boss.attackTimer <= 0) {
+    boss.attackTimer = boss.phase === 2 ? 1.2 : 2;
+    damagePlayer(boss.phase === 2 ? 22 : 15);
+
+    createBurst(
+      player.position.clone().add(new THREE.Vector3(0, 1, 0)),
+      0x995ee8,
+      12
+    );
+  }
+}
+
+function damagePlayer(amount) {
+  if (state.invulnerability > 0 || state.dead) return;
+
+  state.health = Math.max(0, state.health - amount);
+  state.invulnerability = 0.6;
+
+  updateHUD();
+  playTone(75, 0.15, 0.06);
+
+  if (state.health <= 0) {
+    state.dead = true;
+    state.paused = true;
+
+    $("endEyebrow").textContent = "AS SOMBRAS VENCERAM";
+    $("endTitle").textContent = "A jornada foi interrompida";
+    $("endDescription").textContent =
+      "Sua história ainda não terminou. Retome a jornada e tente novamente.";
+
+    ui.ending.classList.remove("hidden");
+    document.exitPointerLock?.();
+  }
+}
+
+/* ---------- Interação ---------- */
+
+function updateInteractionPrompt() {
+  let closest = null;
+  let closestDistance = 3.5;
+
+  for (const item of collectibles) {
+    if (item.collected) continue;
+
+    const distance = player.position.distanceTo(item.root.position);
+
+    if (distance < closestDistance) {
+      closest = {
+        type: "collectible",
+        target: item,
+        distance
       };
-
-      localStorage.setItem(CONFIG.saveKey, JSON.stringify(save));
-    } catch (error) {
-      console.warn("Falha no salvamento automático:", error);
+      closestDistance = distance;
     }
   }
 
-  if (state.toastTimer > 0) {
-    state.toastTimer -= delta;
+  for (const npc of npcs) {
+    const distance = player.position.distanceTo(npc.root.position);
 
-    if (state.toastTimer <= 0) {
-      hideToast();
+    if (distance < (npc.range || 3.5) && distance < closestDistance) {
+      closest = {
+        type: "npc",
+        target: npc,
+        distance
+      };
+      closestDistance = distance;
     }
   }
 
+  if (boss && !boss.defeated) {
+    const distance = player.position.distanceTo(boss.root.position);
+
+    if (distance < 3.5 && distance < closestDistance) {
+      closest = {
+        type: "boss",
+        target: boss,
+        distance
+      };
+    }
+  }
+
+  activeInteraction = closest;
+
+  if (closest) {
+    ui.interactionPrompt?.classList.remove("hidden");
+
+    const labels = {
+      collectible: "Coletar fragmento",
+      npc: closest.target.name === "Ancião de Veyra"
+        ? "Conversar com o ancião"
+        : "Recuperar energia",
+      boss: "Enfrentar o guardião"
+    };
+
+    $("interactionText").textContent = labels[closest.type];
+  } else {
+    ui.interactionPrompt?.classList.add("hidden");
+  }
+}
+
+function interact() {
+  if (!activeInteraction) {
+    showToast("Não há nada para interagir por perto.");
+    return;
+  }
+
+  const { type, target } = activeInteraction;
+
+  if (type === "collectible") {
+    target.collected = true;
+    target.root.visible = false;
+
+    state.crystals++;
+    state.mana = Math.min(state.maxMana, state.mana + 8);
+    state.gold += target.gold;
+    state.xp += 10;
+
+    addInventoryItem({
+      id: `fragment-${target.index}`,
+      name: "Fragmento de Veyra",
+      description: "Energia cristalizada das antigas ruínas.",
+      icon: "✧",
+      count: 1,
+      type: "material"
+    });
+
+    checkLevelUp();
+    updateHUD();
+    updateQuest();
+
+    showToast("Fragmento coletado.");
+    playTone(520, 0.12, 0.035);
+    return;
+  }
+
+  if (type === "npc") {
+    target.interact();
+    return;
+  }
+
+  if (type === "boss") {
+    boss.active = true;
+    $("bossStatus").classList.remove("hidden");
+    showToast("O Guardião do Vazio desperta!");
+  }
+}
+
+/* ---------- Missões ---------- */
+
+function setQuest(title, description, objective) {
+  $("questTitle").textContent = title;
+  $("questDescription").textContent = description;
+  $("objective").textContent = objective;
+}
+
+function updateQuest() {
+  if (boss?.defeated) {
+    setQuest(
+      "O Guardião do Vazio",
+      "A ameaça das ruínas foi derrotada.",
+      "Guardião derrotado"
+    );
+    return;
+  }
+
+  if (state.crystals >= 3) {
+    setQuest(
+      "O Guardião do Vazio",
+      "A energia dos cristais despertou uma presença nas ruínas.",
+      "Encontre o Guardião do Vazio"
+    );
+  } else {
+    setQuest(
+      "Ecos na Escuridão",
+      "Descubra a origem da energia que desperta nas ruínas.",
+      `Colete fragmentos de Veyra: ${state.crystals} / 3`
+    );
+  }
+}
+
+/* ---------- Inventário ---------- */
+
+function addInventoryItem(item) {
+  const existing = state.inventory.find((entry) => entry.id === item.id);
+
+  if (existing) {
+    existing.count = (existing.count || 1) + (item.count || 1);
+  } else {
+    state.inventory.push({ ...item });
+  }
+
+  renderInventory();
+}
+
+function renderInventory() {
+  const container = $("inventoryItems");
+  if (!container) return;
+
+  container.replaceChildren();
+
+  for (let i = 0; i < 30; i++) {
+    const item = state.inventory[i];
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "inventory-slot";
+    button.setAttribute("aria-label", item ? item.name : "Espaço vazio");
+
+    if (item) {
+      button.textContent = item.icon || "◇";
+
+      if (item.count > 1) {
+        const count = document.createElement("span");
+        count.className = "item-count";
+        count.textContent = item.count;
+        button.append(count);
+      }
+
+      if (state.selectedItem === item.id) {
+        button.classList.add("selected");
+      }
+
+      button.addEventListener("click", () => {
+        state.selectedItem = item.id;
+        renderInventory();
+        renderItemDetails(item);
+      });
+    } else {
+      button.textContent = "";
+      button.disabled = true;
+    }
+
+    container.append(button);
+  }
+
+  $("inventoryCount").textContent = `${state.inventory.length} / 30`;
+
+  if (state.selectedItem) {
+    const item = state.inventory.find(
+      (entry) => entry.id === state.selectedItem
+    );
+
+    if (item) {
+      renderItemDetails(item);
+    } else {
+      state.selectedItem = null;
+    }
+  }
+
+  updateInventoryButtons();
+}
+
+function renderItemDetails(item) {
+  const details = $("itemDetails");
+  if (!details) return;
+
+  details.replaceChildren();
+
+  const icon = document.createElement("div");
+  icon.className = "empty-state-symbol";
+  icon.textContent = item.icon || "◇";
+
+  const title = document.createElement("h3");
+  title.textContent = item.name;
+
+  const description = document.createElement("p");
+  description.textContent = item.description || "Um item encontrado durante a jornada.";
+
+  const count = document.createElement("p");
+  count.textContent = `Quantidade: ${item.count || 1}`;
+
+  details.append(icon, title, description, count);
+  updateInventoryButtons();
+}
+
+function updateInventoryButtons() {
+  const item = state.inventory.find(
+    (entry) => entry.id === state.selectedItem
+  );
+
+  $("useItemButton").disabled = !item || item.type !== "potion";
+  $("equipItemButton").disabled = !item || item.type !== "weapon";
+}
+
+function useSelectedItem() {
+  const item = state.inventory.find(
+    (entry) => entry.id === state.selectedItem
+  );
+
+  if (!item) {
+    showToast("Selecione um item primeiro.");
+    return;
+  }
+
+  if (item.type === "potion") {
+    state.health = Math.min(state.maxHealth, state.health + 40);
+    state.mana = Math.min(state.maxMana, state.mana + 25);
+
+    item.count--;
+
+    if (item.count <= 0) {
+      state.inventory = state.inventory.filter(
+        (entry) => entry.id !== item.id
+      );
+      state.selectedItem = null;
+    }
+
+    updateHUD();
+    renderInventory();
+    showToast("Poção utilizada.");
+  } else {
+    showToast("Este item não pode ser utilizado diretamente.");
+  }
+}
+
+function equipSelectedItem() {
+  const item = state.inventory.find(
+    (entry) => entry.id === state.selectedItem
+  );
+
+  if (!item || item.type !== "weapon") return;
+
+  showToast(`${item.name} equipado.`);
+}
+
+/* ---------- Habilidades ---------- */
+
+function renderSkills() {
+  const container = $("skillsList");
+  if (!container) return;
+
+  container.replaceChildren();
+
+  const skills = [
+    {
+      id: "strength",
+      title: "Força",
+      description: "Aumenta o dano dos ataques corpo a corpo.",
+      effect: `Nível atual: ${state.skills.strength}`
+    },
+    {
+      id: "vitality",
+      title: "Vitalidade",
+      description: "Aumenta sua resistência e vida máxima.",
+      effect: `Nível atual: ${state.skills.vitality}`
+    },
+    {
+      id: "arcana",
+      title: "Arcano",
+      description: "Aumenta o poder dos ataques mágicos.",
+      effect: `Nível atual: ${state.skills.arcana}`
+    }
+  ];
+
+  for (const skill of skills) {
+    const card = document.createElement("article");
+    card.className = "skill-card";
+
+    const title = document.createElement("h3");
+    title.textContent = skill.title;
+
+    const description = document.createElement("p");
+    description.textContent = skill.description;
+
+    const level = document.createElement("p");
+    level.textContent = skill.effect;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Aprender habilidade";
+    button.disabled = state.skillPoints <= 0;
+
+    button.addEventListener("click", () => {
+      if (state.skillPoints <= 0) return;
+
+      state.skillPoints--;
+      state.skills[skill.id]++;
+
+      if (skill.id === "vitality") {
+        state.maxHealth += 15;
+        state.health += 15;
+      }
+
+      updateHUD();
+      renderSkills();
+      showToast(`Habilidade ${skill.title} aprimorada.`);
+    });
+
+    card.append(title, description, level, button);
+    container.append(card);
+  }
+
+  $("skillPointsText").textContent = state.skillPoints;
+}
+
+/* ---------- Diálogos ---------- */
+
+function openDialogue(data) {
+  currentDialogue = data;
+
+  $("dialogueSpeaker").textContent = data.speaker || "VIAJANTE";
+  $("dialogueTitle").textContent = data.title || "Conversa";
+  $("dialogueText").textContent = data.text || "";
+
+  const choices = $("dialogueChoices");
+  choices.replaceChildren();
+
+  for (const choice of data.choices || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = choice.text;
+
+    button.addEventListener("click", () => {
+      if (typeof choice.action === "function") {
+        choice.action();
+      }
+
+      closeDialogue();
+    });
+
+    choices.append(button);
+  }
+
+  ui.dialogue.classList.remove("hidden");
+  document.exitPointerLock?.();
+}
+
+function closeDialogue() {
+  ui.dialogue.classList.add("hidden");
+  currentDialogue = null;
+}
+
+/* ---------- HUD ---------- */
+
+function updateHUD() {
+  const hp = Math.max(0, state.health);
+  const mana = Math.max(0, state.mana);
+
+  $("hpText").textContent = `${Math.ceil(hp)} / ${state.maxHealth}`;
+  $("manaText").textContent = `${Math.ceil(mana)} / ${state.maxMana}`;
+
+  $("hpBar").style.width = `${(hp / state.maxHealth) * 100}%`;
+  $("manaBar").style.width = `${(mana / state.maxMana) * 100}%`;
+
+  $("hpProgress").textContent = `${Math.round((hp / state.maxHealth) * 100)}%`;
+  $("manaProgress").textContent = `${Math.round((mana / state.maxMana) * 100)}%`;
+
+  $("levelText").textContent = state.level;
+
+  $("xpBar").style.width = `${Math.min(100, (state.xp / state.xpNext) * 100)}%`;
+  $("xpProgress").textContent = `${Math.round((state.xp / state.xpNext) * 100)}%`;
+
+  $("goldText").textContent = state.gold;
+
+  $("skillPointsText").textContent = state.skillPoints;
+  $("mapLocation").textContent = "Terras Esquecidas";
+}
+
+function updateBossHUD() {
+  if (!boss) return;
+
+  $("bossName").textContent = "Guardião do Vazio";
+  $("bossHpText").textContent =
+    `${Math.ceil(boss.health)} / ${boss.maxHealth}`;
+
+  $("bossHpBar").style.width =
+    `${(boss.health / boss.maxHealth) * 100}%`;
+
+  $("bossPhase").textContent = boss.phase === 2 ? "FASE II" : "FASE I";
+}
+
+/* ---------- Efeitos visuais ---------- */
+
+function createBurst(position, color, count = 8) {
+  for (let i = 0; i < count; i++) {
+    const mesh = makeMesh(
+      new THREE.SphereGeometry(0.045 + Math.random() * 0.045, 6, 6),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 1
+      }),
+      scene,
+      position.toArray()
+    );
+
+    const velocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 4,
+      Math.random() * 3,
+      (Math.random() - 0.5) * 4
+    );
+
+    particles.push({
+      mesh,
+      velocity,
+      life: 0.45 + Math.random() * 0.45,
+      maxLife: 0.9
+    });
+  }
+}
+
+function updateParticles(delta) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const particle = particles[i];
+
+    particle.life -= delta;
+    particle.mesh.position.addScaledVector(particle.velocity, delta);
+    particle.velocity.y -= 2.5 * delta;
+
+    const opacity = Math.max(0, particle.life / particle.maxLife);
+    particle.mesh.material.opacity = opacity;
+    particle.mesh.scale.setScalar(Math.max(0.01, opacity));
+
+    if (particle.life <= 0) {
+      scene.remove(particle.mesh);
+      particle.mesh.geometry.dispose();
+      particle.mesh.material.dispose();
+      particles.splice(i, 1);
+    }
+  }
+}
+
+function updateCollectibles(delta) {
+  const time = performance.now() * 0.001;
+
+  for (const item of collectibles) {
+    if (item.collected) continue;
+
+    item.crystal.position.y =
+      item.baseY + Math.sin(time * 1.7 + item.index) * 0.13;
+
+    item.crystal.rotation.y += delta * 0.8;
+    item.ring.rotation.z += delta * 0.35;
+  }
+}
+
+/* ---------- Áudio simples ---------- */
+
+function playTone(frequency = 220, duration = 0.08, volume = 0.03) {
+  if (state.settings.volume <= 0) return;
+
+  try {
+    audioContext ||= new (
+      window.AudioContext || window.webkitAudioContext
+    )();
+
+    if (audioContext.state === "suspended") {
+      audioContext.resume();
+    }
+
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.value = frequency;
+
+    gain.gain.setValueAtTime(
+      Math.max(0.0001, volume * state.settings.volume),
+      audioContext.currentTime
+    );
+
+    gain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      audioContext.currentTime + duration
+    );
+
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + duration);
+  } catch {
+    // O jogo continua funcionando se o áudio não estiver disponível.
+  }
+}
+
+/* ---------- Notificações ---------- */
+
+function showToast(message) {
+  const toast = $("toast");
+  if (!toast) return;
+
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+
+  clearTimeout(toastTimer);
+
+  toastTimer = setTimeout(() => {
+    toast.classList.add("hidden");
+  }, 2800);
+
+  $("message").textContent = message;
+}
+
+/* ---------- Salvamento ---------- */
+
+function saveGame() {
+  const data = {
+    version: 1,
+    player: {
+      x: player.position.x,
+      y: player.position.y,
+      z: player.position.z,
+      yaw: state.yaw
+    },
+    state: {
+      health: state.health,
+      maxHealth: state.maxHealth,
+      mana: state.mana,
+      maxMana: state.maxMana,
+      level: state.level,
+      xp: state.xp,
+      xpNext: state.xpNext,
+      gold: state.gold,
+      skillPoints: state.skillPoints,
+      crystals: state.crystals,
+      kills: state.kills,
+      skills: state.skills
+    },
+    inventory: state.inventory,
+    selectedItem: state.selectedItem,
+    collected: collectibles
+      .filter((item) => item.collected)
+      .map((item) => item.index),
+    enemies: enemies.map((enemy) => ({
+      index: enemy.index,
+      alive: enemy.alive,
+      health: enemy.health
+    })),
+    boss: {
+      health: boss.health,
+      defeated: boss.defeated,
+      active: boss.active,
+      phase: boss.phase
+    },
+    savedAt: Date.now()
+  };
+
+  try {
+    localStorage.setItem("veyra-save", JSON.stringify(data));
+    saveExists = true;
+    updateContinueButton();
+  } catch {
+    showToast("Não foi possível salvar neste navegador.");
+  }
+}
+
+function readSave() {
+  try {
+    const raw = localStorage.getItem("veyra-save");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function restoreSave(data) {
+  if (!data || data.version !== 1) return;
+
+  if (data.player) {
+    player.position.set(
+      Number(data.player.x) || 0,
+      Number(data.player.y) || 0,
+      Number(data.player.z) || 0
+    );
+
+    state.yaw = Number(data.player.yaw) || 0;
+  }
+
+  Object.assign(state, data.state || {});
+
+  if (data.state?.skills) {
+    state.skills = {
+      strength: Number(data.state.skills.strength) || 0,
+      vitality: Number(data.state.skills.vitality) || 0,
+      arcana: Number(data.state.skills.arcana) || 0
+    };
+  }
+
+  state.inventory = Array.isArray(data.inventory)
+    ? data.inventory
+    : [];
+
+  state.selectedItem = data.selectedItem || null;
+
+  const collected = new Set(data.collected || []);
+
+  collectibles.forEach((item) => {
+    item.collected = collected.has(item.index);
+    item.root.visible = !item.collected;
+  });
+
+  const savedEnemies = new Map(
+    (data.enemies || []).map((enemy) => [enemy.index, enemy])
+  );
+
+  enemies.forEach((enemy) => {
+    const saved = savedEnemies.get(enemy.index);
+
+    if (saved) {
+      enemy.alive = Boolean(saved.alive);
+      enemy.health = Number(saved.health) || enemy.maxHealth;
+      enemy.root.visible = enemy.alive;
+    }
+  });
+
+  if (data.boss) {
+    boss.health = Number(data.boss.health) || boss.maxHealth;
+    boss.defeated = Boolean(data.boss.defeated);
+    boss.active = Boolean(data.boss.active);
+    boss.phase = Number(data.boss.phase) || 1;
+    boss.root.visible = !boss.defeated;
+  }
+
+  updateBossHUD();
+  updateQuest();
+  renderInventory();
   updateHUD();
 }
 
-function animate() {
-  animationFrame = requestAnimationFrame(animate);
+function updateContinueButton() {
+  const button = $("continueButton");
+  if (!button) return;
 
-  const delta = Math.min(clock.getDelta(), 0.05);
+  button.disabled = !saveExists;
+  button.style.opacity = saveExists ? "1" : "0.45";
+}
 
-  if (state.running && !state.paused && !state.ended) {
-    update(delta);
-  } else if (state.toastTimer > 0) {
-    state.toastTimer -= delta;
+/* ---------- Configurações ---------- */
 
-    if (state.toastTimer <= 0) {
-      hideToast();
+function populateSettings() {
+  $("graphicsSelect").value = state.settings.graphics;
+  $("sensitivityInput").value = state.settings.sensitivity;
+  $("volumeInput").value = state.settings.volume;
+  $("shadowsToggle").checked = state.settings.shadows;
+}
+
+function applySettings() {
+  renderer.shadowMap.enabled = state.settings.shadows;
+
+  const pixelRatio = state.settings.graphics === "high"
+    ? Math.min(window.devicePixelRatio || 1, 2)
+    : state.settings.graphics === "low"
+      ? 1
+      : Math.min(window.devicePixelRatio || 1, 1.5);
+
+  renderer.setPixelRatio(pixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  if (state.settings.graphics === "low") {
+    scene.fog.density = 0.006;
+  } else if (state.settings.graphics === "high") {
+    scene.fog.density = 0.009;
+  } else {
+    scene.fog.density = 0.0085;
+  }
+
+  populateSettings();
+}
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("veyra-settings"));
+
+    if (saved) {
+      Object.assign(state.settings, saved);
+    }
+  } catch {
+    // Configurações padrão.
+  }
+
+  populateSettings();
+  applySettings();
+}
+
+/* ---------- Loop principal ---------- */
+
+function loop() {
+  animationFrame = requestAnimationFrame(loop);
+
+  const delta = Math.min(clock.getDelta(), 0.04);
+
+  if (state.started && !state.paused && !state.dead) {
+    updatePlayer(delta);
+    updateEnemies(delta);
+    updateCollectibles(delta);
+
+    if (boss && boss.active && !boss.defeated) {
+      boss.model.cape.rotation.x =
+        -0.08 + Math.sin(performance.now() * 0.0015) * 0.09;
+    }
+
+    // Salvamento automático periódico é implementado sem bloquear a cena.
+    state.lastTime += delta;
+
+    if (state.lastTime >= 60) {
+      state.lastTime = 0;
+      saveGame();
     }
   }
 
+  updateParticles(delta);
+
   renderer.render(scene, camera);
 }
-
-/* =========================================================
-   INICIALIZAÇÃO E LIMPEZA
-========================================================= */
 
 function onResize() {
   if (!camera || !renderer) return;
@@ -2992,90 +2955,16 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function initialize() {
-  if (!ui.game) {
-    throw new Error("Elemento #game não encontrado no HTML.");
+/* ---------- Inicializar ---------- */
+
+try {
+  init();
+} catch (error) {
+  console.error("Erro ao iniciar Ecos de Veyra:", error);
+
+  if (ui.loading) {
+    ui.loading.classList.add("hidden");
   }
 
-  try {
-    renderer = null;
-
-    createWorld();
-
-    clock = new THREE.Clock();
-
-    setupControls();
-    updateQuest();
-    updateHUD();
-    renderInventory();
-
-    window.addEventListener("resize", onResize);
-
-    if (readSave() && ui.continueButton) {
-      ui.continueButton.disabled = false;
-    }
-
-    setScreen(ui.startScreen, true);
-    setScreen(ui.pauseScreen, false);
-    setScreen(ui.endScreen, false);
-    setScreen(ui.inventoryScreen, false);
-    setScreen(ui.mapScreen, false);
-    setScreen(ui.skillsScreen, false);
-    setScreen(ui.settingsScreen, false);
-    setScreen(ui.bossStatus, false);
-    setScreen(ui.mobileControls, isTouchDevice());
-
-    animate();
-
-    if (ui.loadingProgress) {
-      ui.loadingProgress.style.width = "100%";
-    }
-
-    console.info("Ecos de Veyra inicializado.");
-  } catch (error) {
-    console.error("Erro ao inicializar Ecos de Veyra:", error);
-
-    setScreen(ui.loadingScreen, true);
-
-    if (ui.loadingText) {
-      ui.loadingText.textContent =
-        "Não foi possível iniciar o jogo. Verifique o console do navegador.";
-    }
-
-    showMessage("Erro ao iniciar o jogo.");
-  }
+  showToast("Não foi possível iniciar o jogo. Verifique o console.");
 }
-
-window.addEventListener("beforeunload", () => {
-  if (!player || !state.started || state.ended) return;
-
-  try {
-    const save = {
-      version: 1,
-      player: {
-        x: player.position.x,
-        y: player.position.y,
-        z: player.position.z,
-        rotation: player.rotation.y,
-        ...playerData,
-      },
-      crystals: crystals.map((crystal) => crystal.collected),
-      bossDefeated: state.bossDefeated,
-      bossSpawned: state.bossSpawned,
-      playTime: state.playTime,
-      gold: playerData.gold,
-      inventory: inventory.map((item) => ({ ...item })),
-      settings: { ...settings },
-      camera: {
-        yaw: cameraState.yaw,
-        pitch: cameraState.pitch,
-      },
-    };
-
-    localStorage.setItem(CONFIG.saveKey, JSON.stringify(save));
-  } catch (error) {
-    console.warn("Não foi possível salvar ao sair:", error);
-  }
-});
-
-initialize();
